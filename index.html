@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloudflare Domain Adder</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--card:#131b2e;--line:#26334d;--text:#edf2ff;--muted:#aab6cf;--accent:#f48120}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(160deg,#0b1020,#111a2e);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text);min-height:100vh;display:grid;place-items:center;padding:20px}
+main{width:min(100%,520px)}.brand{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:800;margin-bottom:8px}
+h1{font-size:clamp(26px,6vw,36px);line-height:1.15;margin:0 0 8px}.sub{color:var(--muted);margin:0 0 24px}
+.card{background:rgba(19,27,46,.96);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 20px 60px #0004}
+label{display:block;font-weight:650;margin:16px 0 7px}input{width:100%;border:1px solid #34435f;background:#0b1222;color:var(--text);border-radius:10px;padding:13px 14px;font:inherit;outline:none}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px #f4812025}
+button{width:100%;border:0;border-radius:10px;background:var(--accent);color:#1c1208;font-weight:800;font-size:16px;padding:14px;margin-top:20px;cursor:pointer}button:disabled{opacity:.55;cursor:wait}
+.note{font-size:13px;color:var(--muted);margin:12px 0 0}.result{display:none;margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:13px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}.result.ok{display:block;border-color:#247b59;background:#0d2b24}.result.err{display:block;border-color:#8c3b43;background:#32171d}
+footer{font-size:12px;color:var(--muted);text-align:center;margin-top:18px}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">Cloudflare Tools</div>
+  <h1>Domain Adder</h1>
+  <p class="sub">Tambahkan domain ke akun Cloudflare melalui API resmi.</p>
+  <section class="card">
+    <form id="form">
+      <label for="domain">Nama domain</label>
+      <input id="domain" name="domain" placeholder="contoh.com" autocomplete="off" required>
+      <button id="submit" type="submit">Tambah Domain</button>
+    </form>
+    <p class="note">API token disimpan sebagai secret di Worker backend, bukan di halaman ini. Permintaan tetap mengikuti izin dan pembatasan akun Cloudflare.</p>
+    <div id="result" class="result" role="status" aria-live="polite"></div>
+  </section>
+  <footer>Gunakan hanya untuk domain yang Anda miliki atau berwenang kelola.</footer>
+</main>
+<script>
+const form = document.getElementById('form');
+const button = document.getElementById('submit');
+const result = document.getElementById('result');
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const domain = document.getElementById('domain').value.trim().toLowerCase();
+  result.className = 'result';
+  result.style.display = 'block';
+  result.textContent = 'Memproses permintaan…';
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/add-domain', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({domain})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success !== true) {
+      const errors = Array.isArray(data.errors) ? data.errors.map(e => `${e.code ?? ''} ${e.message ?? ''}`.trim()).join('\n') : '';
+      result.className = 'result err';
+      result.textContent = `Gagal (${response.status}).\n${errors || data.message || 'Permintaan ditolak oleh backend/Cloudflare.'}`;
+      return;
+    }
+    result.className = 'result ok';
+    result.textContent = `Permintaan berhasil.\nDomain: ${data.result?.name || domain}\nStatus: ${data.result?.status || 'pending'}\nNameserver: ${(data.result?.name_servers || []).join(', ') || 'belum tersedia'}\n\nCatatan: domain mungkin masih perlu diarahkan ke nameserver yang diberikan Cloudflare.`;
+  } catch (err) {
+    result.className = 'result err';
+    result.textContent = `Tidak bisa menghubungi backend.\nPastikan Worker route /api/add-domain sudah dikonfigurasi.\n${err.message || ''}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
