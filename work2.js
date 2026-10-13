@@ -17,8 +17,7 @@ function normalizeDomain(input) {
   let value = input.trim().toLowerCase();
   if (!value) return null;
 
-  // If a URL was pasted accidentally, extract its hostname.
-  if (/^https?:\\/\\//i.test(value)) {
+  if (/^https?:\/\//i.test(value)) {
     try {
       const parsed = new URL(value);
       if (parsed.username || parsed.password || parsed.port) return null;
@@ -28,13 +27,11 @@ function normalizeDomain(input) {
     }
   }
 
-  value = value.replace(/\\.$/, "");
-  if (!value || value.length > 253 || /[\\/@:\\s?#]/.test(value)) return null;
+  value = value.replace(/\.$/, "");
+  if (!value || value.length > 253 || /[\/@:\s?#]/.test(value)) return null;
   const labels = value.split(".");
   if (labels.length < 2) return null;
 
-  // Validate DNS hostname syntax only. Cloudflare determines whether this is
-  // an allowed root/zone name; this code does not try to infer the public suffix.
   for (const label of labels) {
     if (!label || label.length > 63 ||
         !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) return null;
@@ -67,7 +64,7 @@ export default {
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
 
     if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID || !env.APP_PASSWORD) {
-      return json({ success: false, message: "Konfigurasi Worker belum lengkap. Periksa Secret APP_PASSWORD, Secret CF_API_TOKEN, dan Variable CF_ACCOUNT_ID." }, 500);
+      return json({ success: false, message: "Konfigurasi Worker belum lengkap. Periksa APP_PASSWORD, CF_API_TOKEN, dan CF_ACCOUNT_ID." }, 500);
     }
     if ((request.headers.get("X-App-Password") || "") !== env.APP_PASSWORD) {
       return json({ success: false, message: "Password aplikasi salah." }, 401);
@@ -79,7 +76,7 @@ export default {
 
     const domain = normalizeDomain(body.domain);
     if (!domain) {
-      return json({ success: false, message: "Format nama domain tidak valid. Masukkan hostname seperti contoh.com, tanpa path atau port." }, 400);
+      return json({ success: false, message: "Format nama domain tidak valid. Masukkan hostname seperti contoh.com tanpa path atau port." }, 400);
     }
 
     try {
