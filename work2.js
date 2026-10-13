@@ -12,15 +12,34 @@ function json(data, status = 200) {
   });
 }
 
-function validDomain(value) {
-  if (typeof value !== "string") return false;
-  const domain = value.trim().toLowerCase().replace(/\.$/, "");
-  if (domain.length > 253 || domain.length < 4 || domain.includes("://") ||
-      /[\\/@:\\s]/.test(domain)) return false;
-  const labels = domain.split(".");
-  if (labels.length < 2) return false;
-  return labels.every(label => label.length > 0 && label.length <= 63 &&
-    /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
+function normalizeDomain(input) {
+  if (typeof input !== "string") return null;
+  let value = input.trim().toLowerCase();
+  if (!value) return null;
+
+  // If a URL was pasted accidentally, extract its hostname.
+  if (/^https?:\\/\\//i.test(value)) {
+    try {
+      const parsed = new URL(value);
+      if (parsed.username || parsed.password || parsed.port) return null;
+      value = parsed.hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+
+  value = value.replace(/\\.$/, "");
+  if (!value || value.length > 253 || /[\\/@:\\s?#]/.test(value)) return null;
+  const labels = value.split(".");
+  if (labels.length < 2) return null;
+
+  // Validate DNS hostname syntax only. Cloudflare determines whether this is
+  // an allowed root/zone name; this code does not try to infer the public suffix.
+  for (const label of labels) {
+    if (!label || label.length > 63 ||
+        !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) return null;
+  }
+  return value;
 }
 
 export default {
@@ -41,8 +60,8 @@ export default {
         },
       });
     }
-
     if (!allowed) return json({ success: false, message: "Origin tidak diizinkan." }, 403);
+
     const url = new URL(request.url);
     if (url.pathname !== "/api/add-domain") return json({ success: false, message: "Not found." }, 404);
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
@@ -50,7 +69,6 @@ export default {
     if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID || !env.APP_PASSWORD) {
       return json({ success: false, message: "Konfigurasi Worker belum lengkap. Periksa Secret APP_PASSWORD, Secret CF_API_TOKEN, dan Variable CF_ACCOUNT_ID." }, 500);
     }
-
     if ((request.headers.get("X-App-Password") || "") !== env.APP_PASSWORD) {
       return json({ success: false, message: "Password aplikasi salah." }, 401);
     }
@@ -59,9 +77,9 @@ export default {
     try { body = await request.json(); }
     catch { return json({ success: false, message: "Body JSON tidak valid." }, 400); }
 
-    const domain = String(body.domain || "").trim().toLowerCase().replace(/\.$/, "");
-    if (!validDomain(domain)) {
-      return json({ success: false, message: "Nama domain tidak valid. Masukkan contoh.com tanpa https:// atau path." }, 400);
+    const domain = normalizeDomain(body.domain);
+    if (!domain) {
+      return json({ success: false, message: "Format nama domain tidak valid. Masukkan hostname seperti contoh.com, tanpa path atau port." }, 400);
     }
 
     try {
