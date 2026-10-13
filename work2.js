@@ -53,7 +53,7 @@ export default {
     if (!allowed) return json({ success: false, message: "Origin tidak diizinkan." }, 403);
     const url = new URL(request.url);
     const route = url.pathname;
-    if (route !== "/api/add-domain" && route !== "/api/check-domain") return json({ success: false, message: "Not found." }, 404);
+    if (route !== "/api/add-domain" && route !== "/api/check-domain" && route !== "/api/delete-domain") return json({ success: false, message: "Not found." }, 404);
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
     if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID || !env.APP_PASSWORD) {
       return json({ success: false, message: "Konfigurasi Worker belum lengkap. Periksa APP_PASSWORD, CF_API_TOKEN, dan CF_ACCOUNT_ID." }, 500);
@@ -68,18 +68,35 @@ export default {
     if (!domain) return json({ success: false, message: "Format nama domain tidak valid. Masukkan hostname seperti contoh.com tanpa path atau port." }, 400);
 
     try {
-      if (route === "/api/check-domain") {
+      if (route === "/api/check-domain" || route === "/api/delete-domain") {
         const endpoint = new URL("https://api.cloudflare.com/client/v4/zones");
         endpoint.searchParams.set("name", domain);
         endpoint.searchParams.set("account.id", env.CF_ACCOUNT_ID);
         endpoint.searchParams.set("per_page", "50");
-        const cfResponse = await fetch(endpoint.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` } });
-        const payload = await cfResponse.json().catch(() => ({}));
-        if (!cfResponse.ok || payload.success !== true) {
-          return json({ success: false, message: errorsText(payload) || "Cloudflare gagal memeriksa domain.", errors: payload.errors || [], messages: payload.messages || [] }, cfResponse.status || 502);
+        const lookupResponse = await fetch(endpoint.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` } });
+        const lookup = await lookupResponse.json().catch(() => ({}));
+        if (!lookupResponse.ok || lookup.success !== true) {
+          return json({ success: false, message: errorsText(lookup) || "Cloudflare gagal mencari domain.", errors: lookup.errors || [], messages: lookup.messages || [] }, lookupResponse.status || 502);
         }
-        const zone = (payload.result || []).find(item => String(item.name || "").toLowerCase() === domain) || null;
-        if (!zone) return json({ success: true, found: false, domain, message: "Domain tidak ditemukan pada akun Cloudflare ini." });
+        const zone = (lookup.result || []).find(item => String(item.name || "").toLowerCase() === domain) || null;
+        if (!zone) return json({ success: route === "/api/check-domain", found: false, domain, message: "Domain tidak ditemukan pada akun Cloudflare ini." }, route === "/api/delete-domain" ? 404 : 200);
+
+        if (route === "/api/delete-domain") {
+          // Require an exact typed confirmation to reduce accidental deletion.
+          if (typeof body.confirmDomain !== "string" || body.confirmDomain.trim().toLowerCase() !== domain) {
+            return json({ success: false, message: `Konfirmasi tidak cocok. Isi confirmDomain dengan tepat: ${domain}` }, 400);
+          }
+          const deleteResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(zone.id)}`, {
+            method: "DELETE",
+            headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` }
+          });
+          const deletion = await deleteResponse.json().catch(() => ({}));
+          if (!deleteResponse.ok || deletion.success !== true) {
+            return json({ success: false, message: errorsText(deletion) || "Cloudflare gagal menghapus zona.", errors: deletion.errors || [], messages: deletion.messages || [] }, deleteResponse.status || 502);
+          }
+          return json({ success: true, deleted: true, domain: zone.name, id: zone.id, message: "Zona berhasil dihapus dari akun Cloudflare." });
+        }
+
         return json({ success: true, found: true, domain: zone.name, result: {
           id: zone.id, name: zone.name, status: zone.status, paused: zone.paused,
           type: zone.type, name_servers: zone.name_servers || [],
