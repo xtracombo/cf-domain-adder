@@ -185,10 +185,112 @@ if (route === "/api/pages-list") {
           return json({ success: true, result: d.result || [], result_info: d.result_info || null });
         }
         if (route === "/api/worker-domains-list") {
-          const u = new URL(`${accountBase}/workers/domains`); u.searchParams.set("per_page", "100");
-          const r = await fetch(u.toString(), { headers: auth }); const d = await r.json().catch(() => ({}));
-          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membaca Custom Domains Workers.", errors: d.errors || [] }, r.status || 502);
-          return json({ success: true, result: d.result || [], result_info: d.result_info || null });
+          // Ambil seluruh halaman Custom Domains dan gabungkan hasilnya.
+          const perPage = 100;
+          const maxPages = 1000;
+          const allDomains = [];
+          const seenIds = new Set();
+          const seenPages = new Set();
+          let page = 1;
+          let totalPages = null;
+          let totalCount = null;
+          let paginationComplete = false;
+
+          while (page <= maxPages) {
+            const u = new URL(`${accountBase}/workers/domains`);
+            u.searchParams.set("per_page", String(perPage));
+            u.searchParams.set("page", String(page));
+
+            const r = await fetch(u.toString(), { headers: auth });
+            const d = await r.json().catch(() => ({}));
+
+            if (!r.ok || d.success !== true) {
+              return json({
+                success: false,
+                message: errorsText(d) || `Gagal mengambil Custom Domains pada halaman ${page}.`,
+                errors: d.errors || [],
+                pages_fetched: page - 1,
+                partial_count: allDomains.length
+              }, r.status || 502);
+            }
+
+            const items = Array.isArray(d.result) ? d.result : [];
+            const info = d.result_info || {};
+
+            if (Number.isFinite(Number(info.total_pages)) && Number(info.total_pages) > 0) {
+              totalPages = Number(info.total_pages);
+            }
+            if (Number.isFinite(Number(info.total_count)) && Number(info.total_count) >= 0) {
+              totalCount = Number(info.total_count);
+            }
+
+            if (items.length === 0) {
+              paginationComplete = true;
+              break;
+            }
+
+            // Deteksi halaman identik agar loop tidak mengulang data tanpa akhir.
+            const pageSignature = items.map(item => item.id || [
+              item.hostname || "", item.service || "", item.environment || ""
+            ].join("|")).join(",");
+
+            if (seenPages.has(pageSignature)) {
+              return json({
+                success: false,
+                message: `API mengembalikan halaman duplikat pada halaman ${page}. Pengambilan dihentikan agar hasil tidak menyesatkan.`,
+                pages_fetched: page - 1,
+                partial_count: allDomains.length
+              }, 502);
+            }
+            seenPages.add(pageSignature);
+
+            for (const item of items) {
+              const key = item.id || `${item.hostname || ""}|${item.service || ""}|${item.environment || ""}`;
+              if (!seenIds.has(key)) {
+                seenIds.add(key);
+                allDomains.push(item);
+              }
+            }
+
+            if (totalPages !== null) {
+              if (page >= totalPages) {
+                paginationComplete = true;
+                break;
+              }
+            } else if (items.length < perPage) {
+              paginationComplete = true;
+              break;
+            }
+
+            page++;
+          }
+
+          if (!paginationComplete && page > maxPages) {
+            return json({
+              success: false,
+              message: `Pengambilan dihentikan setelah ${maxPages} halaman. Data mungkin belum lengkap.`,
+              partial_count: allDomains.length,
+              pages_fetched: maxPages,
+              api_total_count: totalCount
+            }, 502);
+          }
+
+          return json({
+            success: true,
+            result: allDomains,
+            result_info: {
+              per_page: perPage,
+              pages_fetched: page,
+              total_pages: totalPages,
+              total_count: totalCount,
+              returned_count: allDomains.length,
+              pagination_complete: paginationComplete,
+              count_matches_api: totalCount === null ? null : allDomains.length === totalCount
+            },
+            message: paginationComplete
+              ? "Pengambilan Custom Domains selesai."
+              : "Pengambilan Custom Domains belum terkonfirmasi lengkap."
+          });
         }
         if (route === "/api/worker-domain-create") {
           const hostname = normalizeDomain(body.hostname);
