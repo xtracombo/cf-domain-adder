@@ -89,7 +89,23 @@ export default {
     }
     if (!allowed) return json({ success: false, message: "Origin tidak diizinkan." }, 403);
     const route = new URL(request.url).pathname;
-    const knownRoutes = ["/api/login", "/api/add-domain", "/api/check-domain", "/api/delete-domain", "/api/dns-list", "/api/dns-create", "/api/dns-update", "/api/dns-delete"];
+    const knownRoutes = [
+  "/api/login",
+  "/api/add-domain",
+  "/api/check-domain",
+  "/api/delete-domain",
+  "/api/dns-list",
+  "/api/dns-create",
+  "/api/dns-update",
+  "/api/dns-delete",
+  "/api/workers-list",
+  "/api/worker-domains-list",
+  "/api/worker-domain-create",
+  "/api/worker-routes-list",
+  "/api/worker-route-create",
+  "/api/worker-route-delete",
+  "/api/pages-list"
+];
     if (!knownRoutes.includes(route)) return json({ success: false, message: "Not found." }, 404);
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
 
@@ -114,6 +130,173 @@ export default {
     }
     let body;
     try { body = await request.json(); } catch { return json({ success: false, message: "Body JSON tidak valid." }, 400); }
+  // Cloudflare Pages management endpoints.
+if (route === "/api/pages-list") {
+  try {
+    const pagesUrl = new URL(
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`
+    );
+
+    pagesUrl.searchParams.set("per_page", "10");
+    pagesUrl.searchParams.set("page", "1");
+
+    const response = await fetch(pagesUrl.toString(), {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${env.CF_API_TOKEN}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || data.success !== true) {
+      return json({
+        success: false,
+        message: errorsText(data) || "Gagal mengambil daftar Cloudflare Pages.",
+        errors: data.errors || []
+      }, response.status || 502);
+    }
+
+    return json({
+      success: true,
+      result: data.result || [],
+      message: "Daftar Cloudflare Pages berhasil dimuat."
+    });
+
+  } catch (error) {
+    return json({
+      success: false,
+      message: "Tidak berhasil menghubungi Cloudflare Pages API."
+    }, 502);
+  }
+}
+    // Cloudflare Workers management endpoints.
+    const workerRoutes = ["/api/workers-list", "/api/worker-domains-list", "/api/worker-domain-create", "/api/worker-routes-list", "/api/worker-route-create", "/api/worker-route-delete"];
+    if (workerRoutes.includes(route)) {
+      const auth = { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" };
+      const accountBase = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}`;
+      try {
+        if (route === "/api/workers-list") {
+          const u = new URL(`${accountBase}/workers/scripts`);
+          u.searchParams.set("per_page", "100");
+          const r = await fetch(u.toString(), { headers: auth }); const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membaca daftar Workers.", errors: d.errors || [] }, r.status || 502);
+          return json({ success: true, result: d.result || [], result_info: d.result_info || null });
+        }
+        if (route === "/api/worker-domains-list") {
+          // Ambil seluruh halaman Custom Domains, bukan hanya halaman pertama.
+          const perPage = 100;
+          const allDomains = [];
+          let page = 1;
+          let totalPages = 1;
+          let totalCount = null;
+
+          while (page <= totalPages && page <= 100) {
+            const u = new URL(`${accountBase}/workers/domains`);
+            u.searchParams.set("per_page", String(perPage));
+            u.searchParams.set("page", String(page));
+
+            const r = await fetch(u.toString(), { headers: auth });
+            const d = await r.json().catch(() => ({}));
+
+            if (!r.ok || d.success !== true) {
+              return json({
+                success: false,
+                message: errorsText(d) || `Gagal membaca Custom Domains Workers pada halaman ${page}.`,
+                errors: d.errors || []
+              }, r.status || 502);
+            }
+
+            const items = Array.isArray(d.result) ? d.result : [];
+            allDomains.push(...items);
+
+            const info = d.result_info || {};
+            if (Number.isFinite(Number(info.total_pages)) && Number(info.total_pages) > 0) {
+              totalPages = Number(info.total_pages);
+            } else if (items.length < perPage) {
+              totalPages = page;
+            } else {
+              totalPages = page + 1;
+            }
+
+            if (Number.isFinite(Number(info.total_count))) {
+              totalCount = Number(info.total_count);
+            }
+
+            if (items.length === 0) break;
+            page++;
+          }
+
+          const seen = new Set();
+          const result = allDomains.filter(item => {
+            const key = item.id || `${item.hostname || ""}|${item.service || ""}|${item.environment || ""}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+
+          return json({
+            success: true,
+            result,
+            result_info: {
+              total_count: totalCount ?? result.length,
+              returned_count: result.length,
+              per_page: perPage,
+              pages_fetched: Math.min(page - 1, 100)
+            }
+          });
+        }
+        if (route === "/api/worker-domain-create") {
+          const hostname = normalizeDomain(body.hostname);
+          const service = typeof body.service === "string" ? body.service.trim() : "";
+          const environment = typeof body.environment === "string" ? body.environment.trim() : "";
+          if (!hostname || !service || service.length > 128 || /[^a-zA-Z0-9_-]/.test(service)) return json({ success: false, message: "Hostname atau nama Worker tidak valid." }, 400);
+          const payload = { hostname, service };
+          if (environment) payload.environment = environment;
+          const r = await fetch(`${accountBase}/workers/domains`, { method: "PUT", headers: auth, body: JSON.stringify(payload) });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membuat Worker Custom Domain.", errors: d.errors || [] }, r.status || 502);
+          return json({ success: true, result: d.result || null, message: "Permintaan Custom Domain berhasil." });
+        }
+        const zoneName = normalizeDomain(body.domain);
+        if (!zoneName) return json({ success: false, message: "Masukkan nama zona yang valid." }, 400);
+        const zonesUrl = new URL("https://api.cloudflare.com/client/v4/zones");
+        zonesUrl.searchParams.set("name", zoneName); zonesUrl.searchParams.set("account.id", env.CF_ACCOUNT_ID); zonesUrl.searchParams.set("per_page", "50");
+        const zr = await fetch(zonesUrl.toString(), { headers: auth }); const zp = await zr.json().catch(() => ({}));
+        if (!zr.ok || zp.success !== true) return json({ success: false, message: errorsText(zp) || "Gagal mencari zona Cloudflare.", errors: zp.errors || [] }, zr.status || 502);
+        const zone = (zp.result || []).find(z => String(z.name || "").toLowerCase() === zoneName);
+        if (!zone) return json({ success: false, message: `Zona ${zoneName} tidak ditemukan di akun ini.` }, 404);
+        const routesBase = `https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(zone.id)}/workers/routes`;
+        if (route === "/api/worker-routes-list") {
+          const r = await fetch(routesBase, { headers: auth }); const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membaca Workers Routes.", errors: d.errors || [] }, r.status || 502);
+          return json({ success: true, zone: zone.name, zoneId: zone.id, result: d.result || [] });
+        }
+        if (route === "/api/worker-route-create") {
+          const pattern = typeof body.pattern === "string" ? body.pattern.trim().toLowerCase() : "";
+          const script = typeof body.script === "string" ? body.script.trim() : "";
+          const suffix = `.${zone.name}`;
+          const hostPart = pattern.split("/")[0];
+          const bareHost = hostPart.startsWith("*.") ? hostPart.slice(2) : hostPart;
+          if (!script || script.length > 128 || /[^a-zA-Z0-9_-]/.test(script)) return json({ success: false, message: "Pilih nama Worker yang valid." }, 400);
+          if (!pattern || !pattern.includes("/") || !pattern.endsWith("/*") || !(bareHost === zone.name || bareHost.endsWith(suffix)) || /[?#\s]/.test(pattern)) {
+            return json({ success: false, message: `Pattern harus berupa hostname dalam zona ${zone.name}, misalnya app.${zone.name}/* atau *.${zone.name}/*.` }, 400);
+          }
+          const r = await fetch(routesBase, { method: "POST", headers: auth, body: JSON.stringify({ pattern, script }) }); const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membuat Workers Route.", errors: d.errors || [] }, r.status || 502);
+          return json({ success: true, zone: zone.name, result: d.result || null, message: "Workers Route berhasil dibuat." });
+        }
+        if (route === "/api/worker-route-delete") {
+          const routeId = typeof body.routeId === "string" ? body.routeId.trim() : "";
+          if (!/^[a-f0-9-]{16,64}$/i.test(routeId)) return json({ success: false, message: "ID route tidak valid." }, 400);
+          const r = await fetch(`${routesBase}/${encodeURIComponent(routeId)}`, { method: "DELETE", headers: auth }); const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus Workers Route.", errors: d.errors || [] }, r.status || 502);
+          return json({ success: true, deleted: true, message: "Workers Route berhasil dihapus." });
+        }
+      } catch { return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare Workers API." }, 502); }
+    }
+
     // DNS endpoints operate on a zone that already exists in this Cloudflare account.
     const dnsRoute = ["/api/dns-list", "/api/dns-create", "/api/dns-update", "/api/dns-delete"].includes(route);
     if (dnsRoute) {
