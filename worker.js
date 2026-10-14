@@ -137,7 +137,8 @@ if (route === "/api/pages-list") {
       `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`
     );
 
-    pagesUrl.searchParams.set("per_page", "100");
+    pagesUrl.searchParams.set("per_page", "10");
+    pagesUrl.searchParams.set("page", "1");
 
     const response = await fetch(pagesUrl.toString(), {
       method: "GET",
