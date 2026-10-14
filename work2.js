@@ -89,7 +89,7 @@ export default {
     }
     if (!allowed) return json({ success: false, message: "Origin tidak diizinkan." }, 403);
     const route = new URL(request.url).pathname;
-    const knownRoutes = ["/api/login", "/api/add-domain", "/api/check-domain", "/api/delete-domain"];
+    const knownRoutes = ["/api/login", "/api/add-domain", "/api/check-domain", "/api/delete-domain", "/api/dns-list", "/api/dns-create", "/api/dns-update", "/api/dns-delete"];
     if (!knownRoutes.includes(route)) return json({ success: false, message: "Not found." }, 404);
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
 
@@ -114,6 +114,57 @@ export default {
     }
     let body;
     try { body = await request.json(); } catch { return json({ success: false, message: "Body JSON tidak valid." }, 400); }
+    // DNS endpoints operate on a zone that already exists in this Cloudflare account.
+    const dnsRoute = ["/api/dns-list", "/api/dns-create", "/api/dns-update", "/api/dns-delete"].includes(route);
+    if (dnsRoute) {
+      const zoneName = normalizeDomain(body.domain);
+      if (!zoneName) return json({ success: false, message: "Nama zona tidak valid." }, 400);
+      if (["/api/dns-update", "/api/dns-delete"].includes(route) && (typeof body.recordId !== "string" || !/^[a-f0-9]{32}$/i.test(body.recordId))) {
+        return json({ success: false, message: "Record ID tidak valid." }, 400);
+      }
+      try {
+        const zonesUrl = new URL("https://api.cloudflare.com/client/v4/zones");
+        zonesUrl.searchParams.set("name", zoneName);
+        zonesUrl.searchParams.set("account.id", env.CF_ACCOUNT_ID);
+        zonesUrl.searchParams.set("per_page", "50");
+        const zr = await fetch(zonesUrl.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` } });
+        const zp = await zr.json().catch(() => ({}));
+        if (!zr.ok || zp.success !== true) return json({ success: false, message: errorsText(zp) || "Gagal mencari zona Cloudflare.", errors: zp.errors || [] }, zr.status || 502);
+        const zone = (zp.result || []).find(z => String(z.name || "").toLowerCase() === zoneName);
+        if (!zone) return json({ success: false, message: `Zona ${zoneName} tidak ditemukan di akun ini.` }, 404);
+        const base = `https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(zone.id)}/dns_records`;
+        const auth = { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" };
+        if (route === "/api/dns-list") {
+          const u = new URL(base); u.searchParams.set("per_page", "100"); u.searchParams.set("page", String(Math.max(1, Math.min(10000, Number(body.page) || 1))));
+          if (body.search) u.searchParams.set("name", String(body.search).trim());
+          const r = await fetch(u.toString(), { headers: auth }); const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membaca DNS records.", errors: d.errors || [] }, r.status || 502);
+          return json({ success: true, zone: zone.name, zoneId: zone.id, result: d.result || [], result_info: d.result_info || null });
+        }
+        if (route === "/api/dns-delete") {
+          const r = await fetch(`${base}/${encodeURIComponent(body.recordId)}`, { method: "DELETE", headers: auth }); const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus DNS record.", errors: d.errors || [] }, r.status || 502);
+          return json({ success: true, deleted: true, zone: zone.name, recordId: body.recordId, message: "DNS record berhasil dihapus." });
+        }
+        const allowedTypes = ["A", "AAAA", "CNAME", "TXT", "MX", "SRV", "CAA", "NS"];
+        const type = String(body.type || "").toUpperCase();
+        const content = typeof body.content === "string" ? body.content.trim() : "";
+        let name = typeof body.name === "string" ? body.name.trim().toLowerCase() : "";
+        if (!name || name === "@") name = zone.name;
+        else if (name !== zone.name && !name.endsWith(`.${zone.name}`)) name = `${name}.${zone.name}`;
+        if (!allowedTypes.includes(type)) return json({ success: false, message: `Tipe record tidak didukung. Pilih: ${allowedTypes.join(", ")}.` }, 400);
+        if (!content) return json({ success: false, message: "Konten/target DNS wajib diisi." }, 400);
+        if (name.length > 253 || name.split(".").some(label => !label || label.length > 63 || !/^[a-z0-9_*](?:[a-z0-9_-]*[a-z0-9_*])?$/.test(label))) return json({ success: false, message: "Nama DNS tidak valid." }, 400);
+        const record = { type, name, content, ttl: Number(body.ttl) === 1 ? 1 : Math.max(60, Math.min(86400, Number(body.ttl) || 1)), proxied: ["A", "AAAA", "CNAME"].includes(type) && body.proxied === true };
+        if (type === "MX") { record.priority = Number.isInteger(Number(body.priority)) ? Math.max(0, Math.min(65535, Number(body.priority))) : 10; }
+        if (type === "SRV") { record.data = body.data && typeof body.data === "object" ? body.data : undefined; }
+        const isUpdate = route === "/api/dns-update";
+        const r = await fetch(isUpdate ? `${base}/${encodeURIComponent(body.recordId)}` : base, { method: isUpdate ? "PUT" : "POST", headers: auth, body: JSON.stringify(record) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || (isUpdate ? "Gagal memperbarui DNS record." : "Gagal membuat DNS record."), errors: d.errors || [] }, r.status || 502);
+        return json({ success: true, zone: zone.name, result: d.result || null, message: isUpdate ? "DNS record berhasil diperbarui." : "DNS record berhasil dibuat." });
+      } catch { return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare API." }, 502); }
+    }
     const domain = normalizeDomain(body.domain);
     if (!domain) return json({ success: false, message: "Format nama domain tidak valid. Masukkan hostname seperti contoh.com tanpa path atau port." }, 400);
 
