@@ -30,6 +30,7 @@
     <div class="nav-label">DOMAIN</div><button class="nav" data-page="add"><span class="ico">＋</span>Tambah Domain</button><button class="nav" data-page="check"><span class="ico">⌕</span>Cek Domain</button><button class="nav" data-page="delete"><span class="ico">⌫</span>Hapus Domain</button>
     <div class="nav-label">DNS MANAGEMENT</div><button class="nav" data-page="dns"><span class="ico">◈</span>DNS Records</button><button class="nav" data-page="subdomain"><span class="ico">↳</span>Subdomain <span class="soon">LIVE</span></button><button class="nav" data-page="wildcard"><span class="ico">✳</span>Wildcard <span class="soon">LIVE</span></button>
     <div class="nav-label">CLOUDFLARE WORKERS</div><button class="nav" data-page="workers"><span class="ico">ϟ</span>Daftar Workers</button><button class="nav" data-page="routes"><span class="ico">⇢</span>Domains & Routes</button>
+    <div class="nav-label">CLOUDFLARE PAGES</div><button class="nav" data-page="pages"><span class="ico">▤</span>Daftar Pages</button>
     <div class="side-foot">🔒 Token Cloudflare tetap tersimpan di backend Worker. Jangan membagikan token atau password.</div>
   </aside><main class="main" id="mainContent"></main></div>
 </section>
@@ -79,6 +80,7 @@ function renderPage(page){
  if(page==='wildcard') { renderWildcardPage(); return; }
  if(page==='workers'){renderWorkersPage();return;}
  if(page==='routes'){renderRoutesPage();return;}
+ if(page==='pages'){renderPagesPage();return;}
  const info={dns:['◈','DNS Records','Kelola record A, AAAA, CNAME, TXT dan lainnya langsung melalui Cloudflare API.'],subdomain:['↳','Subdomain','Buat subdomain seperti youtube.com.kings.biz.id dengan memilih zona dan nama host.'],wildcard:['✳','Wildcard DNS','Kelola record wildcard seperti *.kings.biz.id. Wildcard DNS tidak otomatis mengonfigurasi layanan Worker.']};const x=info[page]||info.dns;mainContent.innerHTML=head('MODULES',x[1],x[2])+`<div class="card placeholder"><div><div class="big">${x[0]}</div><h2>${x[1]}</h2><p class="muted">Modul ini sudah tersedia pada menu DNS Management.</p></div></div>`;
 }
 
@@ -119,6 +121,105 @@ async function renderWorkersPage(){
  const msg=$('workersMessage'), table=$('workersTable');
  $('workersReload').onclick=async()=>{msg.textContent='Memuat daftar Workers...';table.textContent='Memuat...';try{const d=await api('/api/workers-list',{});const items=d.result||[];msg.textContent=`Berhasil memuat ${items.length} Worker.`;msg.style.borderColor='#246d58';if(!items.length){table.innerHTML='<p class="muted">Belum ada Worker yang dikembalikan API, atau token tidak memiliki izin baca Workers.</p>';return;}table.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${['Nama Worker','ID','Preview'].map(x=>`<th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">${x}</th>`).join('')}</tr></thead><tbody>${items.map(w=>`<tr><td style="padding:10px;overflow-wrap:anywhere">${esc(w.id||w.script||w.name||'-')}</td><td style="padding:10px;overflow-wrap:anywhere">${esc(w.id||'-')}</td><td style="padding:10px;overflow-wrap:anywhere">${esc(w.modified_on||w.created_on||'-')}</td></tr>`).join('')}</tbody></table></div>`;}catch(e){msg.textContent='Gagal: '+e.message;msg.style.borderColor='#79324a';table.textContent='Tidak dapat memuat daftar Workers.';}};
  $('workersReload').click();
+}
+  async function renderPagesPage(){
+  mainContent.innerHTML =
+    head(
+      'CLOUDFLARE PAGES',
+      'Daftar Pages',
+      'Lihat proyek Cloudflare Pages pada akun yang terhubung.'
+    ) +
+    `<div class="card">
+      <div class="actions">
+        <button class="btn" id="pagesReload">
+          Muat Daftar Pages
+        </button>
+      </div>
+
+      <div id="pagesMessage" class="result"></div>
+
+      <div id="pagesTable" class="muted">
+        Tekan Muat Daftar Pages.
+      </div>
+    </div>`;
+
+  const msg = $('pagesMessage');
+  const table = $('pagesTable');
+
+  $('pagesReload').onclick = async () => {
+    msg.textContent = 'Memuat daftar Pages...';
+    msg.style.borderColor = '';
+
+    table.textContent = 'Memuat...';
+
+    $('pagesReload').disabled = true;
+
+    try {
+      const data = await api('/api/pages-list', {});
+
+      const items = data.result || [];
+
+      msg.textContent =
+        `Berhasil memuat ${items.length} proyek Pages.`;
+
+      msg.style.borderColor = '#246d58';
+
+      if (!items.length) {
+        table.innerHTML =
+          '<p class="muted">Belum ada proyek Pages yang ditemukan.</p>';
+        return;
+      }
+
+      table.innerHTML = `
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Nama Proyek</th>
+                <th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">URL Pages</th>
+                <th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Dibuat</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(p => {
+                const name = p.name || p.id || '-';
+                const url = p.subdomain
+                  ? 'https://' + p.subdomain
+                  : '-';
+
+                return `
+                  <tr>
+                    <td style="padding:10px;overflow-wrap:anywhere">
+                      ${esc(name)}
+                    </td>
+                    <td style="padding:10px;overflow-wrap:anywhere">
+                      ${
+                        p.subdomain
+                          ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:#9aabff">${esc(url)}</a>`
+                          : '-'
+                      }
+                    </td>
+                    <td style="padding:10px;overflow-wrap:anywhere">
+                      ${esc(p.created_on || '-')}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (err) {
+      msg.textContent = 'Gagal memuat Pages: ' + err.message;
+      msg.style.borderColor = '#79324a';
+
+      table.textContent =
+        'Tidak dapat memuat daftar Pages.';
+    } finally {
+      $('pagesReload').disabled = false;
+    }
+  };
+
+  $('pagesReload').click();
 }
 async function renderRoutesPage(){
  mainContent.innerHTML=head('CLOUDFLARE WORKERS','Domains & Routes','Kelola Worker Custom Domains dan Workers Routes. Pastikan hostname berada di zona yang benar dan Worker tujuan sudah ada.')+`<div class="card"><h2 class="section-title">Worker Custom Domain</h2><p class="muted">Menghubungkan hostname langsung ke Worker. Gunakan hostname pada zona yang sudah aktif dan DNS-nya dikelola Cloudflare.</p><form id="customDomainForm"><div class="form-grid"><div class="field"><label for="customHostname">Hostname</label><input id="customHostname" required placeholder="app.kings.biz.id" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="customService">Nama Worker / Service</label><input id="customService" required placeholder="nama-worker" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="customEnvironment">Environment (opsional)</label><input id="customEnvironment" placeholder="production"></div></div><button class="btn" id="customCreate">Hubungkan Custom Domain</button><div id="customMessage" class="result"></div></form><div class="actions"><button class="btn secondary" id="customListBtn">Muat Custom Domains</button></div><div id="customList" class="muted"></div></div><div class="card action-card"><h2 class="section-title">Workers Routes</h2><p class="muted">Route memakai pola URL seperti <b>app.kings.biz.id/*</b> atau <b>*.kings.biz.id/*</b>. Route bekerja pada traffic yang melewati Cloudflare proxy dan memerlukan zona yang aktif.</p><form id="routeForm"><div class="form-grid"><div class="field"><label for="routeZone">Zona Cloudflare</label><input id="routeZone" required placeholder="kings.biz.id" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="routePattern">Pattern</label><input id="routePattern" required placeholder="app.kings.biz.id/*" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="routeScript">Nama Worker</label><input id="routeScript" required placeholder="nama-worker" autocapitalize="none" spellcheck="false"></div></div><button class="btn" id="routeCreate">Buat Route</button><div id="routeMessage" class="result"></div></form><div class="actions"><button class="btn secondary" id="routeListBtn">Muat Routes Zona</button></div><div id="routeList" class="muted"></div></div>`;
