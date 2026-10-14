@@ -89,7 +89,23 @@ export default {
     }
     if (!allowed) return json({ success: false, message: "Origin tidak diizinkan." }, 403);
     const route = new URL(request.url).pathname;
-    const knownRoutes = ["/api/login", "/api/add-domain", "/api/check-domain", "/api/delete-domain", "/api/dns-list", "/api/dns-create", "/api/dns-update", "/api/dns-delete", "/api/workers-list", "/api/worker-domains-list", "/api/worker-domain-create", "/api/worker-routes-list", "/api/worker-route-create", "/api/worker-route-delete"];
+    const knownRoutes = [
+  "/api/login",
+  "/api/add-domain",
+  "/api/check-domain",
+  "/api/delete-domain",
+  "/api/dns-list",
+  "/api/dns-create",
+  "/api/dns-update",
+  "/api/dns-delete",
+  "/api/workers-list",
+  "/api/worker-domains-list",
+  "/api/worker-domain-create",
+  "/api/worker-routes-list",
+  "/api/worker-route-create",
+  "/api/worker-route-delete",
+  "/api/pages-list"
+];
     if (!knownRoutes.includes(route)) return json({ success: false, message: "Not found." }, 404);
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
 
@@ -114,6 +130,46 @@ export default {
     }
     let body;
     try { body = await request.json(); } catch { return json({ success: false, message: "Body JSON tidak valid." }, 400); }
+  // Cloudflare Pages management endpoints.
+if (route === "/api/pages-list") {
+  try {
+    const pagesUrl = new URL(
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`
+    );
+
+    pagesUrl.searchParams.set("per_page", "100");
+
+    const response = await fetch(pagesUrl.toString(), {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${env.CF_API_TOKEN}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || data.success !== true) {
+      return json({
+        success: false,
+        message: errorsText(data) || "Gagal mengambil daftar Cloudflare Pages.",
+        errors: data.errors || []
+      }, response.status || 502);
+    }
+
+    return json({
+      success: true,
+      result: data.result || [],
+      message: "Daftar Cloudflare Pages berhasil dimuat."
+    });
+
+  } catch (error) {
+    return json({
+      success: false,
+      message: "Tidak berhasil menghubungi Cloudflare Pages API."
+    }, 502);
+  }
+}
     // Cloudflare Workers management endpoints.
     const workerRoutes = ["/api/workers-list", "/api/worker-domains-list", "/api/worker-domain-create", "/api/worker-routes-list", "/api/worker-route-create", "/api/worker-route-delete"];
     if (workerRoutes.includes(route)) {
