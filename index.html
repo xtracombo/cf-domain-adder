@@ -117,109 +117,20 @@ async function renderDnsPage(){
 }
 
 async function renderWorkersPage(){
- mainContent.innerHTML=head('CLOUDFLARE WORKERS','Daftar Workers','Ambil daftar script Worker dari akun Cloudflare yang terhubung.')+`<div class="card"><div class="actions"><button class="btn" id="workersReload">Muat Daftar Workers</button></div><div id="workersMessage" class="result"></div><div id="workersTable" class="muted">Tekan Muat Daftar Workers.</div></div>`;
- const msg=$('workersMessage'), table=$('workersTable');
- $('workersReload').onclick=async()=>{msg.textContent='Memuat daftar Workers...';table.textContent='Memuat...';try{const d=await api('/api/workers-list',{});const items=d.result||[];msg.textContent=`Berhasil memuat ${items.length} Worker.`;msg.style.borderColor='#246d58';if(!items.length){table.innerHTML='<p class="muted">Belum ada Worker yang dikembalikan API, atau token tidak memiliki izin baca Workers.</p>';return;}table.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${['Nama Worker','ID','Preview'].map(x=>`<th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">${x}</th>`).join('')}</tr></thead><tbody>${items.map(w=>`<tr><td style="padding:10px;overflow-wrap:anywhere">${esc(w.id||w.script||w.name||'-')}</td><td style="padding:10px;overflow-wrap:anywhere">${esc(w.id||'-')}</td><td style="padding:10px;overflow-wrap:anywhere">${esc(w.modified_on||w.created_on||'-')}</td></tr>`).join('')}</tbody></table></div>`;}catch(e){msg.textContent='Gagal: '+e.message;msg.style.borderColor='#79324a';table.textContent='Tidak dapat memuat daftar Workers.';}};
- $('workersReload').click();
+ mainContent.innerHTML=head('CLOUDFLARE WORKERS','Daftar Workers','Pilih satu Worker untuk melihat dan mengelola Custom Domains yang terhubung.')+`<div class="card"><div class="field"><label for="workerSelect">Pilih Worker</label><select id="workerSelect" style="width:100%;background:#090f1f;border:1px solid var(--line);border-radius:12px;padding:13px;color:var(--text)"><option value="">Memuat daftar Worker...</option></select></div><div class="actions"><button class="btn" id="workersReload">Muat / Refresh Workers</button></div><div id="workersMessage" class="result"></div></div><div class="card action-card"><h2 class="section-title">Custom Domains Worker terpilih</h2><p class="muted">Pilih Worker di atas. Untuk mengganti hostname, domain baru ditambahkan dahulu; domain lama dihapus hanya setelah penambahan baru berhasil.</p><div id="workerDomainEditor" class="muted">Pilih Worker untuk melihat domain.</div></div>`;
+ const msg=$('workersMessage'),select=$('workerSelect'),editor=$('workerDomainEditor');let allDomains=[];
+ async function loadDomains(){editor.textContent='Memuat Custom Domains...';try{const d=await api('/api/worker-domains-list',{});allDomains=d.result||[];drawDomains();}catch(e){editor.textContent='Gagal memuat Custom Domains: '+e.message;}}
+ function drawDomains(){const service=select.value;if(!service){editor.textContent='Pilih Worker terlebih dahulu.';return;}const domains=allDomains.filter(x=>(x.service||x.script||'')===service);if(!domains.length){editor.innerHTML='<p class="muted">Belum ada Custom Domain untuk Worker ini.</p><button class="btn secondary" id="workerAddFirst">＋ Tambah Custom Domain</button><div id="workerEditBox"></div>';$('workerAddFirst').onclick=()=>showEditor(null);return;}editor.innerHTML=`<div class="result" style="border-color:#246d58">${domains.length} Custom Domain untuk Worker <b>${esc(service)}</b>.</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${['Hostname','Environment','Status','Aksi'].map(x=>`<th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">${x}</th>`).join('')}</tr></thead><tbody>${domains.map((x,i)=>`<tr><td style="padding:10px;overflow-wrap:anywhere">${esc(x.hostname||'-')}</td><td style="padding:10px">${esc(x.environment||'production')}</td><td style="padding:10px">${esc(x.status||'-')}</td><td style="padding:10px;white-space:nowrap"><button class="btn secondary" data-wedit="${i}" style="padding:7px 9px">Ganti</button> <button class="btn danger" data-wdel="${i}" style="padding:7px 9px">Hapus</button></td></tr>`).join('')}</tbody></table></div><div class="actions"><button class="btn secondary" id="workerAddDomain">＋ Tambah Custom Domain</button></div><div id="workerEditBox"></div>`;editor.querySelectorAll('[data-wedit]').forEach(b=>b.onclick=()=>showEditor(domains[Number(b.dataset.wedit)]));editor.querySelectorAll('[data-wdel]').forEach(b=>b.onclick=async()=>{const x=domains[Number(b.dataset.wdel)];if(!confirm(`Hapus Custom Domain ${x.hostname} dari Worker ${service}?`))return;try{const out=await api('/api/worker-domain-delete',{hostname:x.hostname});msg.textContent=out.message||'Domain dihapus.';msg.style.borderColor='#246d58';await loadDomains();}catch(e){msg.textContent='Gagal menghapus domain: '+e.message;msg.style.borderColor='#79324a';}});$('workerAddDomain').onclick=()=>showEditor(null);}
+ function showEditor(item){const box=$('workerEditBox');box.innerHTML=`<div class="card" style="margin-top:16px"><h3 class="section-title">${item?'Ganti Custom Domain':'Tambah Custom Domain'}</h3><form id="workerDomainForm"><div class="field"><label for="workerDomainHostname">Hostname baru</label><input id="workerDomainHostname" required placeholder="app.domainkamu.com" autocapitalize="none" spellcheck="false" value="${esc(item?.hostname||'')}"></div><div class="field"><label for="workerDomainEnv">Environment</label><input id="workerDomainEnv" value="${esc(item?.environment||'production')}" placeholder="production"></div><div class="actions"><button class="btn" type="submit">Simpan</button><button class="btn secondary" type="button" id="workerDomainCancel">Batal</button></div><div id="workerDomainFormMsg" class="result"></div></form></div>`;$('workerDomainCancel').onclick=()=>box.innerHTML='';$('workerDomainForm').onsubmit=async e=>{e.preventDefault();const hostname=$('workerDomainHostname').value.trim().toLowerCase(),environment=$('workerDomainEnv').value.trim(),fm=$('workerDomainFormMsg');if(!confirm(item?`Ganti ${item.hostname} menjadi ${hostname}? Domain baru dibuat dahulu. Domain lama dihapus hanya jika domain baru berhasil.`:`Hubungkan ${hostname} ke Worker ${select.value}?`))return;fm.textContent='Menyimpan...';const submit=e.submitter;if(submit)submit.disabled=true;try{await api('/api/worker-domain-create',{hostname,service:select.value,environment});if(item&&item.hostname!==hostname){try{await api('/api/worker-domain-delete',{hostname:item.hostname});fm.textContent='Domain baru berhasil dibuat dan domain lama dihapus.';}catch(delErr){fm.textContent='Domain baru berhasil dibuat, tetapi domain lama belum terhapus: '+delErr.message;fm.style.borderColor='#79324a';await loadDomains();return;}}else fm.textContent='Custom Domain berhasil disimpan.';fm.style.borderColor='#246d58';await loadDomains();}catch(err){fm.textContent='Gagal menyimpan: '+err.message;fm.style.borderColor='#79324a';}finally{if(submit)submit.disabled=false;}};box.scrollIntoView({behavior:'smooth',block:'center'});}
+ $('workersReload').onclick=async()=>{msg.textContent='Memuat daftar Workers...';select.innerHTML='<option value="">Memuat...</option>';try{const d=await api('/api/workers-list',{}),items=d.result||[];select.innerHTML='<option value="">— Pilih Worker —</option>'+items.map(w=>{const n=w.id||w.script||w.name||'';return `<option value="${esc(n)}">${esc(n)}</option>`;}).join('');msg.textContent=`Berhasil memuat ${items.length} Worker.`;msg.style.borderColor='#246d58';if(items.length){select.value=items[0].id||items[0].script||items[0].name||'';await loadDomains();}else editor.textContent='Tidak ada Worker yang dikembalikan API.';}catch(e){msg.textContent='Gagal memuat Workers: '+e.message;msg.style.borderColor='#79324a';select.innerHTML='<option value="">Gagal memuat</option>';}};select.onchange=()=>drawDomains();$('workersReload').click();
 }
-  async function renderPagesPage(){
-  mainContent.innerHTML =
-    head(
-      'CLOUDFLARE PAGES',
-      'Daftar Pages',
-      'Lihat proyek Cloudflare Pages pada akun yang terhubung.'
-    ) +
-    `<div class="card">
-      <div class="actions">
-        <button class="btn" id="pagesReload">
-          Muat Daftar Pages
-        </button>
-      </div>
-
-      <div id="pagesMessage" class="result"></div>
-
-      <div id="pagesTable" class="muted">
-        Tekan Muat Daftar Pages.
-      </div>
-    </div>`;
-
-  const msg = $('pagesMessage');
-  const table = $('pagesTable');
-
-  $('pagesReload').onclick = async () => {
-    msg.textContent = 'Memuat daftar Pages...';
-    msg.style.borderColor = '';
-
-    table.textContent = 'Memuat...';
-
-    $('pagesReload').disabled = true;
-
-    try {
-      const data = await api('/api/pages-list', {});
-
-      const items = data.result || [];
-
-      msg.textContent =
-        `Berhasil memuat ${items.length} proyek Pages.`;
-
-      msg.style.borderColor = '#246d58';
-
-      if (!items.length) {
-        table.innerHTML =
-          '<p class="muted">Belum ada proyek Pages yang ditemukan.</p>';
-        return;
-      }
-
-      table.innerHTML = `
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead>
-              <tr>
-                <th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Nama Proyek</th>
-                <th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">URL Pages</th>
-                <th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Dibuat</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${items.map(p => {
-                const name = p.name || p.id || '-';
-                const url = p.subdomain
-                  ? 'https://' + p.subdomain
-                  : '-';
-
-                return `
-                  <tr>
-                    <td style="padding:10px;overflow-wrap:anywhere">
-                      ${esc(name)}
-                    </td>
-                    <td style="padding:10px;overflow-wrap:anywhere">
-                      ${
-                        p.subdomain
-                          ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:#9aabff">${esc(url)}</a>`
-                          : '-'
-                      }
-                    </td>
-                    <td style="padding:10px;overflow-wrap:anywhere">
-                      ${esc(p.created_on || '-')}
-                    </td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    } catch (err) {
-      msg.textContent = 'Gagal memuat Pages: ' + err.message;
-      msg.style.borderColor = '#79324a';
-
-      table.textContent =
-        'Tidak dapat memuat daftar Pages.';
-    } finally {
-      $('pagesReload').disabled = false;
-    }
-  };
-
-  $('pagesReload').click();
+async function renderPagesPage(){
+ mainContent.innerHTML=head('CLOUDFLARE PAGES','Daftar Pages','Pilih satu proyek Pages untuk melihat dan mengelola Custom Domains proyek tersebut.')+`<div class="card"><div class="field"><label for="pagesProjectSelect">Pilih proyek Pages</label><select id="pagesProjectSelect" style="width:100%;background:#090f1f;border:1px solid var(--line);border-radius:12px;padding:13px;color:var(--text)"><option value="">Memuat daftar Pages...</option></select></div><div class="actions"><button class="btn" id="pagesReload">Muat / Refresh Pages</button></div><div id="pagesMessage" class="result"></div></div><div class="card action-card"><h2 class="section-title">Custom Domains Pages terpilih</h2><p class="muted">Pilih proyek di atas untuk mengelola domain khusus proyek itu. Domain baru ditambahkan terlebih dahulu saat mengganti hostname.</p><div id="pagesDomainsTable" class="muted">Pilih proyek Pages untuk melihat domain.</div></div>`;
+ const msg=$('pagesMessage'),select=$('pagesProjectSelect'),table=$('pagesDomainsTable');let domains=[];
+ async function loadDomains(){const projectName=select.value;if(!projectName){table.textContent='Pilih proyek Pages terlebih dahulu.';return;}table.textContent='Memuat Custom Domains...';try{const d=await api('/api/pages-domains-list',{projectName});domains=d.result||[];drawDomains();}catch(e){table.textContent='Gagal memuat Custom Domains Pages: '+e.message;}}
+ function drawDomains(){const projectName=select.value;if(!domains.length){table.innerHTML='<p class="muted">Belum ada Custom Domain untuk proyek ini.</p><button class="btn secondary" id="pagesAddFirst">＋ Tambah Custom Domain</button><div id="pagesDomainEditor"></div>';$('pagesAddFirst').onclick=()=>showEditor(null);return;}table.innerHTML=`<div class="result" style="border-color:#246d58">${domains.length} Custom Domain untuk proyek <b>${esc(projectName)}</b>.</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${['Hostname','Status','Aksi'].map(x=>`<th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">${x}</th>`).join('')}</tr></thead><tbody>${domains.map((x,i)=>`<tr><td style="padding:10px;overflow-wrap:anywhere">${esc(x.name||x.hostname||'-')}</td><td style="padding:10px">${esc(x.status||x.verification_data?.status||'-')}</td><td style="padding:10px;white-space:nowrap"><button class="btn secondary" data-pedit="${i}" style="padding:7px 9px">Ganti</button> <button class="btn danger" data-pdel="${i}" style="padding:7px 9px">Hapus</button></td></tr>`).join('')}</tbody></table></div><div class="actions"><button class="btn secondary" id="pagesAddDomain">＋ Tambah Custom Domain</button></div><div id="pagesDomainEditor"></div>`;table.querySelectorAll('[data-pedit]').forEach(b=>b.onclick=()=>showEditor(domains[Number(b.dataset.pedit)]));table.querySelectorAll('[data-pdel]').forEach(b=>b.onclick=async()=>{const x=domains[Number(b.dataset.pdel)],hostname=x.name||x.hostname;if(!hostname||!confirm(`Hapus ${hostname} dari proyek Pages ${projectName}?`))return;try{const out=await api('/api/pages-domain-delete',{projectName,domain:hostname});msg.textContent=out.message||'Domain dihapus.';msg.style.borderColor='#246d58';await loadDomains();}catch(e){msg.textContent='Gagal menghapus domain: '+e.message;msg.style.borderColor='#79324a';}});$('pagesAddDomain').onclick=()=>showEditor(null);}
+ function showEditor(item){const box=$('pagesDomainEditor'),old=item?(item.name||item.hostname||''):'';box.innerHTML=`<div class="card" style="margin-top:16px"><h3 class="section-title">${item?'Ganti Custom Domain':'Tambah Custom Domain'}</h3><form id="pagesDomainForm"><div class="field"><label for="pagesDomainHostname">Hostname</label><input id="pagesDomainHostname" required placeholder="app.domainkamu.com" autocapitalize="none" spellcheck="false" value="${esc(old)}"></div><div class="actions"><button class="btn" type="submit">Simpan</button><button class="btn secondary" type="button" id="pagesDomainCancel">Batal</button></div><div id="pagesDomainFormMsg" class="result"></div></form></div>`;$('pagesDomainCancel').onclick=()=>box.innerHTML='';$('pagesDomainForm').onsubmit=async e=>{e.preventDefault();const hostname=$('pagesDomainHostname').value.trim().toLowerCase(),fm=$('pagesDomainFormMsg');if(!confirm(item?`Ganti ${old} menjadi ${hostname} pada Pages ${select.value}? Domain baru ditambahkan dahulu; domain lama hanya dihapus jika penambahan berhasil.`:`Tambahkan ${hostname} ke Pages ${select.value}?`))return;fm.textContent='Menyimpan...';const submit=e.submitter;if(submit)submit.disabled=true;try{await api('/api/pages-domain-create',{projectName:select.value,domain:hostname});if(item&&old!==hostname){try{await api('/api/pages-domain-delete',{projectName:select.value,domain:old});fm.textContent='Domain baru berhasil ditambahkan dan domain lama dihapus.';}catch(delErr){fm.textContent='Domain baru berhasil ditambahkan, tetapi domain lama belum terhapus: '+delErr.message;fm.style.borderColor='#79324a';await loadDomains();return;}}else fm.textContent='Custom Domain berhasil disimpan.';fm.style.borderColor='#246d58';await loadDomains();}catch(err){fm.textContent='Gagal menyimpan: '+err.message;fm.style.borderColor='#79324a';}finally{if(submit)submit.disabled=false;}};box.scrollIntoView({behavior:'smooth',block:'center'});}
+ $('pagesReload').onclick=async()=>{msg.textContent='Memuat daftar proyek Pages...';select.innerHTML='<option value="">Memuat...</option>';table.textContent='Pilih proyek Pages untuk melihat domain.';try{const data=await api('/api/pages-list',{}),projects=data.result||[];select.innerHTML='<option value="">— Pilih proyek Pages —</option>'+projects.map(p=>`<option value="${esc(p.name||'')}">${esc(p.name||p.id||'Proyek tanpa nama')}</option>`).join('');msg.textContent=`Berhasil memuat ${projects.length} proyek Pages.`;msg.style.borderColor='#246d58';if(projects.length){select.value=projects[0].name||'';await loadDomains();}else table.textContent='Tidak ada proyek Pages yang ditemukan.';}catch(e){msg.textContent='Gagal memuat Pages: '+e.message;msg.style.borderColor='#79324a';select.innerHTML='<option value="">Gagal memuat</option>';}};select.onchange=()=>loadDomains();$('pagesReload').click();
 }
 async function renderRoutesPage(){
  mainContent.innerHTML=head('CLOUDFLARE WORKERS','Domains & Routes','Kelola Worker Custom Domains dan Workers Routes. Pastikan hostname berada di zona yang benar dan Worker tujuan sudah ada.')+`<div class="card"><h2 class="section-title">Worker Custom Domain</h2><p class="muted">Menghubungkan hostname langsung ke Worker. Gunakan hostname pada zona yang sudah aktif dan DNS-nya dikelola Cloudflare.</p><form id="customDomainForm"><div class="form-grid"><div class="field"><label for="customHostname">Hostname</label><input id="customHostname" required placeholder="app.kings.biz.id" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="customService">Nama Worker / Service</label><input id="customService" required placeholder="nama-worker" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="customEnvironment">Environment (opsional)</label><input id="customEnvironment" placeholder="production"></div></div><button class="btn" id="customCreate">Hubungkan Custom Domain</button><div id="customMessage" class="result"></div></form><div class="actions"><button class="btn secondary" id="customListBtn">Muat Custom Domains</button></div><div class="field"><label for="customSearch">Cari hostname / Worker</label><input id="customSearch" placeholder="Ketik hostname atau nama Worker..." autocapitalize="none" spellcheck="false"></div><div id="customCount" class="muted">Daftar belum dimuat.</div><div id="customList" class="muted"></div></div><div class="card action-card"><h2 class="section-title">Workers Routes</h2><p class="muted">Route memakai pola URL seperti <b>app.kings.biz.id/*</b> atau <b>*.kings.biz.id/*</b>. Route bekerja pada traffic yang melewati Cloudflare proxy dan memerlukan zona yang aktif.</p><form id="routeForm"><div class="form-grid"><div class="field"><label for="routeZone">Zona Cloudflare</label><input id="routeZone" required placeholder="kings.biz.id" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="routePattern">Pattern</label><input id="routePattern" required placeholder="app.kings.biz.id/*" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="routeScript">Nama Worker</label><input id="routeScript" required placeholder="nama-worker" autocapitalize="none" spellcheck="false"></div></div><button class="btn" id="routeCreate">Buat Route</button><div id="routeMessage" class="result"></div></form><div class="actions"><button class="btn secondary" id="routeListBtn">Muat Routes Zona</button></div><div id="routeList" class="muted"></div></div>`;
