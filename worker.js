@@ -101,10 +101,15 @@ export default {
   "/api/workers-list",
   "/api/worker-domains-list",
   "/api/worker-domain-create",
+  "/api/worker-domain-delete",
+  "/api/pages-domains-list",
+  "/api/pages-domain-create",
+  "/api/pages-domain-delete",
   "/api/worker-routes-list",
   "/api/worker-route-create",
   "/api/worker-route-delete",
-  "/api/pages-list"
+  "/api/pages-list",
+  "/api/zones-list"
 ];
     if (!knownRoutes.includes(route)) return json({ success: false, message: "Not found." }, 404);
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
@@ -131,48 +136,79 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json({ success: false, message: "Body JSON tidak valid." }, 400); }
   // Cloudflare Pages management endpoints.
+if (route === "/api/zones-list") {
+  try {
+    const all = [];
+    let page = 1, totalPages = 1;
+    while (page <= totalPages && page <= 100) {
+      const u = new URL("https://api.cloudflare.com/client/v4/zones");
+      u.searchParams.set("account.id", env.CF_ACCOUNT_ID);
+      u.searchParams.set("per_page", "100");
+      u.searchParams.set("page", String(page));
+      const r = await fetch(u.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" } });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal memuat daftar domain Cloudflare.", errors: d.errors || [] }, r.status || 502);
+      all.push(...(Array.isArray(d.result) ? d.result : []));
+      const tp = Number(d.result_info?.total_pages);
+      if (Number.isFinite(tp) && tp > 0) totalPages = tp;
+      else if ((d.result || []).length < 100) totalPages = page;
+      page++;
+    }
+    return json({ success: true, result: all.map(z => ({ id: z.id, name: z.name, status: z.status })), result_info: { returned_count: all.length, pages_fetched: Math.min(page - 1, 100) } });
+  } catch {
+    return json({ success: false, message: "Tidak berhasil memuat daftar domain Cloudflare." }, 502);
+  }
+}
 if (route === "/api/pages-list") {
   try {
-    const pagesUrl = new URL(
-      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`
-    );
-
-    pagesUrl.searchParams.set("per_page", "10");
-    pagesUrl.searchParams.set("page", "1");
-
-    const response = await fetch(pagesUrl.toString(), {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${env.CF_API_TOKEN}`,
-        "Content-Type": "application/json"
-      }
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok || data.success !== true) {
-      return json({
-        success: false,
-        message: errorsText(data) || "Gagal mengambil daftar Cloudflare Pages.",
-        errors: data.errors || []
-      }, response.status || 502);
+    const all = [];
+    let page = 1;
+    let totalPages = 1;
+    while (page <= totalPages && page <= 100) {
+      const pagesUrl = new URL(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`);
+      pagesUrl.searchParams.set("per_page", "100");
+      pagesUrl.searchParams.set("page", String(page));
+      const response = await fetch(pagesUrl.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success !== true) return json({ success: false, message: errorsText(data) || "Gagal mengambil daftar Cloudflare Pages.", errors: data.errors || [] }, response.status || 502);
+      all.push(...(Array.isArray(data.result) ? data.result : []));
+      const tp = Number(data.result_info?.total_pages);
+      if (Number.isFinite(tp) && tp > 0) totalPages = tp;
+      else if ((data.result || []).length < 100) totalPages = page;
+      page++;
     }
-
-    return json({
-      success: true,
-      result: data.result || [],
-      message: "Daftar Cloudflare Pages berhasil dimuat."
-    });
-
-  } catch (error) {
-    return json({
-      success: false,
-      message: "Tidak berhasil menghubungi Cloudflare Pages API."
-    }, 502);
+    return json({ success: true, result: all, result_info: { pages_fetched: Math.min(page - 1, 100), returned_count: all.length }, message: "Daftar Cloudflare Pages berhasil dimuat." });
+  } catch {
+    return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare Pages API." }, 502);
+  }
+}
+if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-delete"].includes(route)) {
+  const projectName = typeof body.projectName === "string" ? body.projectName.trim() : "";
+  if (!projectName || projectName.length > 58 || !/^[a-z0-9][a-z0-9-]*$/.test(projectName)) return json({ success: false, message: "Nama proyek Pages tidak valid." }, 400);
+  const projectBase = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects/${encodeURIComponent(projectName)}/domains`;
+  const auth = { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" };
+  try {
+    if (route === "/api/pages-domains-list") {
+      const r = await fetch(projectBase, { headers: auth }); const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membaca Custom Domains Pages.", errors: d.errors || [] }, r.status || 502);
+      return json({ success: true, result: d.result || [], result_info: d.result_info || null, projectName });
+    }
+    const domain = normalizeDomain(body.domain);
+    if (!domain) return json({ success: false, message: "Hostname/domain tidak valid." }, 400);
+    if (route === "/api/pages-domain-create") {
+      const r = await fetch(projectBase, { method: "POST", headers: auth, body: JSON.stringify({ name: domain }) }); const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menambahkan domain ke Pages.", errors: d.errors || [] }, r.status || 502);
+      return json({ success: true, result: d.result || null, message: "Custom Domain Pages berhasil ditambahkan." });
+    }
+    const r = await fetch(`${projectBase}/${encodeURIComponent(domain)}`, { method: "DELETE", headers: auth }); const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus domain dari Pages.", errors: d.errors || [] }, r.status || 502);
+    return json({ success: true, deleted: true, message: "Domain berhasil dihapus dari Pages." });
+  } catch {
+    return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare Pages API." }, 502);
   }
 }
     // Cloudflare Workers management endpoints.
-    const workerRoutes = ["/api/workers-list", "/api/worker-domains-list", "/api/worker-domain-create", "/api/worker-routes-list", "/api/worker-route-create", "/api/worker-route-delete"];
+    const workerRoutes = ["/api/workers-list", "/api/worker-domains-list", "/api/worker-domain-create", "/api/worker-domain-delete", "/api/worker-routes-list", "/api/worker-route-create", "/api/worker-route-delete"];
     if (workerRoutes.includes(route)) {
       const auth = { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" };
       const accountBase = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}`;
@@ -185,7 +221,6 @@ if (route === "/api/pages-list") {
           return json({ success: true, result: d.result || [], result_info: d.result_info || null });
         }
         if (route === "/api/worker-domains-list") {
-          // Ambil seluruh halaman Custom Domains dan gabungkan hasilnya.
           const perPage = 100;
           const maxPages = 1000;
           const allDomains = [];
@@ -200,97 +235,32 @@ if (route === "/api/pages-list") {
             const u = new URL(`${accountBase}/workers/domains`);
             u.searchParams.set("per_page", String(perPage));
             u.searchParams.set("page", String(page));
-
             const r = await fetch(u.toString(), { headers: auth });
             const d = await r.json().catch(() => ({}));
-
             if (!r.ok || d.success !== true) {
-              return json({
-                success: false,
-                message: errorsText(d) || `Gagal mengambil Custom Domains pada halaman ${page}.`,
-                errors: d.errors || [],
-                pages_fetched: page - 1,
-                partial_count: allDomains.length
-              }, r.status || 502);
+              return json({ success: false, message: errorsText(d) || `Gagal mengambil Custom Domains pada halaman ${page}.`, errors: d.errors || [], pages_fetched: page - 1, partial_count: allDomains.length }, r.status || 502);
             }
-
             const items = Array.isArray(d.result) ? d.result : [];
             const info = d.result_info || {};
-
-            if (Number.isFinite(Number(info.total_pages)) && Number(info.total_pages) > 0) {
-              totalPages = Number(info.total_pages);
-            }
-            if (Number.isFinite(Number(info.total_count)) && Number(info.total_count) >= 0) {
-              totalCount = Number(info.total_count);
-            }
-
-            if (items.length === 0) {
-              paginationComplete = true;
-              break;
-            }
-
-            // Deteksi halaman identik agar loop tidak mengulang data tanpa akhir.
-            const pageSignature = items.map(item => item.id || [
-              item.hostname || "", item.service || "", item.environment || ""
-            ].join("|")).join(",");
-
-            if (seenPages.has(pageSignature)) {
-              return json({
-                success: false,
-                message: `API mengembalikan halaman duplikat pada halaman ${page}. Pengambilan dihentikan agar hasil tidak menyesatkan.`,
-                pages_fetched: page - 1,
-                partial_count: allDomains.length
-              }, 502);
-            }
-            seenPages.add(pageSignature);
-
+            if (Number.isFinite(Number(info.total_pages)) && Number(info.total_pages) > 0) totalPages = Number(info.total_pages);
+            if (Number.isFinite(Number(info.total_count)) && Number(info.total_count) >= 0) totalCount = Number(info.total_count);
+            if (items.length === 0) { paginationComplete = true; break; }
+            const signature = items.map(item => item.id || `${item.hostname || ''}|${item.service || ''}|${item.environment || ''}`).join('|');
+            if (seenPages.has(signature)) return json({ success: false, message: `API mengembalikan halaman duplikat pada halaman ${page}. Pengambilan dihentikan agar tidak mengulang data.`, pages_fetched: page - 1, partial_count: allDomains.length, api_total_count: totalCount }, 502);
+            seenPages.add(signature);
             for (const item of items) {
-              const key = item.id || `${item.hostname || ""}|${item.service || ""}|${item.environment || ""}`;
-              if (!seenIds.has(key)) {
-                seenIds.add(key);
-                allDomains.push(item);
-              }
+              const key = item.id || `${item.hostname || ''}|${item.service || ''}|${item.environment || ''}`;
+              if (!seenIds.has(key)) { seenIds.add(key); allDomains.push(item); }
             }
-
             if (totalPages !== null) {
-              if (page >= totalPages) {
-                paginationComplete = true;
-                break;
-              }
+              if (page >= totalPages) { paginationComplete = true; break; }
             } else if (items.length < perPage) {
-              paginationComplete = true;
-              break;
+              paginationComplete = true; break;
             }
-
             page++;
           }
-
-          if (!paginationComplete && page > maxPages) {
-            return json({
-              success: false,
-              message: `Pengambilan dihentikan setelah ${maxPages} halaman. Data mungkin belum lengkap.`,
-              partial_count: allDomains.length,
-              pages_fetched: maxPages,
-              api_total_count: totalCount
-            }, 502);
-          }
-
-          return json({
-            success: true,
-            result: allDomains,
-            result_info: {
-              per_page: perPage,
-              pages_fetched: page,
-              total_pages: totalPages,
-              total_count: totalCount,
-              returned_count: allDomains.length,
-              pagination_complete: paginationComplete,
-              count_matches_api: totalCount === null ? null : allDomains.length === totalCount
-            },
-            message: paginationComplete
-              ? "Pengambilan Custom Domains selesai."
-              : "Pengambilan Custom Domains belum terkonfirmasi lengkap."
-          });
+          if (!paginationComplete && page > maxPages) return json({ success: false, message: `Pengambilan dihentikan setelah ${maxPages} halaman. Data mungkin belum lengkap.`, partial_count: allDomains.length, pages_fetched: maxPages, api_total_count: totalCount }, 502);
+          return json({ success: true, result: allDomains, result_info: { per_page: perPage, pages_fetched: Math.min(page, maxPages), total_pages: totalPages, total_count: totalCount, returned_count: allDomains.length, pagination_complete: paginationComplete, count_matches_api: totalCount === null ? null : allDomains.length === totalCount }, message: paginationComplete ? "Pengambilan Custom Domains selesai." : "Pengambilan Custom Domains belum terkonfirmasi lengkap." });
         }
         if (route === "/api/worker-domain-create") {
           const hostname = normalizeDomain(body.hostname);
@@ -303,6 +273,14 @@ if (route === "/api/pages-list") {
           const d = await r.json().catch(() => ({}));
           if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membuat Worker Custom Domain.", errors: d.errors || [] }, r.status || 502);
           return json({ success: true, result: d.result || null, message: "Permintaan Custom Domain berhasil." });
+        }
+        if (route === "/api/worker-domain-delete") {
+          const hostname = normalizeDomain(body.hostname);
+          if (!hostname) return json({ success: false, message: "Hostname tidak valid." }, 400);
+          const r = await fetch(`${accountBase}/workers/domains/${encodeURIComponent(hostname)}`, { method: "DELETE", headers: auth });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus Worker Custom Domain.", errors: d.errors || [] }, r.status || 502);
+          return json({ success: true, deleted: true, message: "Worker Custom Domain berhasil dihapus." });
         }
         const zoneName = normalizeDomain(body.domain);
         if (!zoneName) return json({ success: false, message: "Masukkan nama zona yang valid." }, 400);
