@@ -108,7 +108,8 @@ export default {
   "/api/worker-routes-list",
   "/api/worker-route-create",
   "/api/worker-route-delete",
-  "/api/pages-list"
+  "/api/pages-list",
+  "/api/zones-list"
 ];
     if (!knownRoutes.includes(route)) return json({ success: false, message: "Not found." }, 404);
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
@@ -135,25 +136,42 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json({ success: false, message: "Body JSON tidak valid." }, 400); }
   // Cloudflare Pages management endpoints.
-if (route === "/api/pages-list") {
+if (route === "/api/zones-list") {
   try {
     const all = [];
-    let page = 1;
-    let totalPages = 1;
+    let page = 1, totalPages = 1;
     while (page <= totalPages && page <= 100) {
-      const pagesUrl = new URL(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`);
-      pagesUrl.searchParams.set("per_page", "100");
-      pagesUrl.searchParams.set("page", String(page));
-      const response = await fetch(pagesUrl.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" } });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || data.success !== true) return json({ success: false, message: errorsText(data) || "Gagal mengambil daftar Cloudflare Pages.", errors: data.errors || [] }, response.status || 502);
-      all.push(...(Array.isArray(data.result) ? data.result : []));
-      const tp = Number(data.result_info?.total_pages);
+      const u = new URL("https://api.cloudflare.com/client/v4/zones");
+      u.searchParams.set("account.id", env.CF_ACCOUNT_ID);
+      u.searchParams.set("per_page", "100");
+      u.searchParams.set("page", String(page));
+      const r = await fetch(u.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" } });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal memuat daftar domain Cloudflare.", errors: d.errors || [] }, r.status || 502);
+      all.push(...(Array.isArray(d.result) ? d.result : []));
+      const tp = Number(d.result_info?.total_pages);
       if (Number.isFinite(tp) && tp > 0) totalPages = tp;
-      else if ((data.result || []).length < 100) totalPages = page;
+      else if ((d.result || []).length < 100) totalPages = page;
       page++;
     }
-    return json({ success: true, result: all, result_info: { pages_fetched: Math.min(page - 1, 100), returned_count: all.length }, message: "Daftar Cloudflare Pages berhasil dimuat." });
+    return json({ success: true, result: all.map(z => ({ id: z.id, name: z.name, status: z.status })), result_info: { returned_count: all.length, pages_fetched: Math.min(page - 1, 100) } });
+  } catch {
+    return json({ success: false, message: "Tidak berhasil memuat daftar domain Cloudflare." }, 502);
+  }
+}
+if (route === "/api/pages-list") {
+  try {
+    // Cloudflare Pages projects endpoint does not accept the standard
+    // page/per_page query options in this account/API response. Request the
+    // collection without pagination parameters to avoid error 8000024.
+    const pagesUrl = new URL(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`);
+    const response = await fetch(pagesUrl.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" } });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success !== true) {
+      return json({ success: false, message: errorsText(data) || "Gagal mengambil daftar Cloudflare Pages.", errors: data.errors || [] }, response.status || 502);
+    }
+    const projects = Array.isArray(data.result) ? data.result : [];
+    return json({ success: true, result: projects, result_info: { returned_count: projects.length }, message: "Daftar Cloudflare Pages berhasil dimuat." });
   } catch {
     return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare Pages API." }, 502);
   }
@@ -172,9 +190,77 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
     const domain = normalizeDomain(body.domain);
     if (!domain) return json({ success: false, message: "Hostname/domain tidak valid." }, 400);
     if (route === "/api/pages-domain-create") {
-      const r = await fetch(projectBase, { method: "POST", headers: auth, body: JSON.stringify({ name: domain }) }); const d = await r.json().catch(() => ({}));
+      const r = await fetch(projectBase, { method: "POST", headers: auth, body: JSON.stringify({ name: domain }) });
+      const d = await r.json().catch(() => ({}));
       if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menambahkan domain ke Pages.", errors: d.errors || [] }, r.status || 502);
-      return json({ success: true, result: d.result || null, message: "Custom Domain Pages berhasil ditambahkan." });
+
+      // Automatically create the DNS CNAME needed by Pages, when this hostname
+      // belongs to a zone managed in the same Cloudflare account. Never overwrite
+      // an existing record that points somewhere else.
+      const dnsSetup = { attempted: false, created: false, status: "skipped", message: "DNS tidak dibuat otomatis." };
+      try {
+        const zonesUrl = new URL("https://api.cloudflare.com/client/v4/zones");
+        zonesUrl.searchParams.set("account.id", env.CF_ACCOUNT_ID);
+        zonesUrl.searchParams.set("per_page", "100");
+        zonesUrl.searchParams.set("page", "1");
+        const zonesResponse = await fetch(zonesUrl.toString(), { headers: auth });
+        const zonesData = await zonesResponse.json().catch(() => ({}));
+        if (zonesResponse.ok && zonesData.success === true) {
+          const zones = Array.isArray(zonesData.result) ? zonesData.result : [];
+          const zone = zones.filter(z => domain === z.name || domain.endsWith("." + z.name))
+            .sort((a, b) => String(b.name || "").length - String(a.name || "").length)[0];
+          if (zone) {
+            dnsSetup.attempted = true;
+            const recordName = domain;
+            const target = `${projectName}.pages.dev`;
+            const dnsBase = `https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(zone.id)}/dns_records`;
+            const searchUrl = new URL(dnsBase);
+            searchUrl.searchParams.set("name", recordName);
+            searchUrl.searchParams.set("per_page", "100");
+            const existingResponse = await fetch(searchUrl.toString(), { headers: auth });
+            const existingData = await existingResponse.json().catch(() => ({}));
+            if (!existingResponse.ok || existingData.success !== true) {
+              dnsSetup.status = "error";
+              dnsSetup.message = errorsText(existingData) || "Domain Pages ditambahkan, tetapi DNS record gagal diperiksa.";
+            } else {
+              const records = Array.isArray(existingData.result) ? existingData.result : [];
+              const same = records.find(rec => String(rec.type).toUpperCase() === "CNAME" && String(rec.content || "").replace(/\.$/, "").toLowerCase() === target.toLowerCase());
+              const conflict = records.find(rec => !same && (String(rec.type).toUpperCase() !== "TXT"));
+              if (same) {
+                dnsSetup.status = "existing";
+                dnsSetup.created = false;
+                dnsSetup.message = `DNS CNAME sudah ada dan mengarah ke ${target}.`;
+                dnsSetup.record = same;
+              } else if (conflict) {
+                dnsSetup.status = "conflict";
+                dnsSetup.message = `Domain Pages ditambahkan, tetapi DNS tidak diubah karena sudah ada record ${conflict.type} untuk ${recordName}. Periksa record itu sebelum menggantinya ke ${target}.`;
+              } else {
+                const createResponse = await fetch(dnsBase, { method: "POST", headers: auth, body: JSON.stringify({ type: "CNAME", name: recordName, content: target, ttl: 1, proxied: false }) });
+                const createData = await createResponse.json().catch(() => ({}));
+                if (createResponse.ok && createData.success === true) {
+                  dnsSetup.status = "created";
+                  dnsSetup.created = true;
+                  dnsSetup.message = `DNS CNAME otomatis dibuat: ${recordName} → ${target} (DNS only).`;
+                  dnsSetup.record = createData.result || null;
+                } else {
+                  dnsSetup.status = "error";
+                  dnsSetup.message = errorsText(createData) || "Domain Pages ditambahkan, tetapi pembuatan DNS CNAME gagal.";
+                }
+              }
+            }
+          } else {
+            dnsSetup.status = "zone-not-found";
+            dnsSetup.message = "Domain Pages ditambahkan, tetapi zona DNS yang cocok tidak ditemukan pada akun Cloudflare ini. DNS perlu dibuat manual.";
+          }
+        } else {
+          dnsSetup.status = "error";
+          dnsSetup.message = errorsText(zonesData) || "Domain Pages ditambahkan, tetapi daftar zona gagal dimuat untuk membuat DNS.";
+        }
+      } catch {
+        dnsSetup.status = "error";
+        dnsSetup.message = "Domain Pages berhasil ditambahkan, tetapi terjadi kesalahan saat menyiapkan DNS otomatis.";
+      }
+      return json({ success: true, result: d.result || null, dns: dnsSetup, message: "Custom Domain Pages berhasil ditambahkan." });
     }
     const r = await fetch(`${projectBase}/${encodeURIComponent(domain)}`, { method: "DELETE", headers: auth }); const d = await r.json().catch(() => ({}));
     if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus domain dari Pages.", errors: d.errors || [] }, r.status || 502);
@@ -253,10 +339,105 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
         if (route === "/api/worker-domain-delete") {
           const hostname = normalizeDomain(body.hostname);
           if (!hostname) return json({ success: false, message: "Hostname tidak valid." }, 400);
-          const r = await fetch(`${accountBase}/workers/domains/${encodeURIComponent(hostname)}`, { method: "DELETE", headers: auth });
-          const d = await r.json().catch(() => ({}));
-          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus Worker Custom Domain.", errors: d.errors || [] }, r.status || 502);
-          return json({ success: true, deleted: true, message: "Worker Custom Domain berhasil dihapus." });
+
+          // Cloudflare's DELETE endpoint expects the Custom Domain ID, not its hostname.
+          // Resolve the ID from the account's Custom Domains list before deleting.
+          let domainId = typeof body.domainId === "string" ? body.domainId.trim() : "";
+          if (!domainId) {
+            // Some Cloudflare responses omit result_info.total_pages. In that case,
+            // keep paging while the page is full; do not assume page 1 is the only page.
+            const perPage = 100;
+            const maxPages = 1000;
+            let page = 1;
+            let pagesFetched = 0;
+            let apiTotalPages = null;
+            let apiTotalCount = null;
+            let foundDomain = null;
+            while (page <= maxPages) {
+              const listUrl = new URL(`${accountBase}/workers/domains`);
+              listUrl.searchParams.set("per_page", String(perPage));
+              listUrl.searchParams.set("page", String(page));
+              const listResponse = await fetch(listUrl.toString(), { headers: auth });
+              const listData = await listResponse.json().catch(() => ({}));
+              if (!listResponse.ok || listData.success !== true) {
+                return json({ success: false, message: errorsText(listData) || `Gagal mencari Custom Domain pada halaman ${page} sebelum penghapusan.`, errors: listData.errors || [], pages_fetched: pagesFetched }, listResponse.status || 502);
+              }
+              pagesFetched++;
+              const items = Array.isArray(listData.result) ? listData.result : [];
+              const info = listData.result_info || {};
+              const totalPagesValue = Number(info.total_pages);
+              const totalCountValue = Number(info.total_count);
+              if (Number.isFinite(totalPagesValue) && totalPagesValue > 0) apiTotalPages = totalPagesValue;
+              if (Number.isFinite(totalCountValue) && totalCountValue >= 0) apiTotalCount = totalCountValue;
+              foundDomain = items.find(item => String(item.hostname || "").trim().toLowerCase() === hostname) || null;
+              if (foundDomain) {
+                domainId = String(foundDomain.id || "").trim();
+                break;
+              }
+              if (items.length === 0) break;
+              if (apiTotalPages !== null && page >= apiTotalPages) break;
+              if (apiTotalPages === null && items.length < perPage) break;
+              page++;
+            }
+            if (!domainId && page > maxPages) {
+              return json({ success: false, message: `Pencarian Custom Domain dihentikan setelah ${maxPages} halaman. Domain tidak dihapus karena hasil pencarian belum dipastikan lengkap.`, pages_fetched: pagesFetched, api_total_pages: apiTotalPages, api_total_count: apiTotalCount }, 502);
+            }
+            if (foundDomain && !domainId) {
+              return json({ success: false, message: `Custom Domain ${hostname} ditemukan pada daftar Cloudflare tetapi responsnya tidak memiliki ID penghapusan. Kunci yang tersedia: ${Object.keys(foundDomain).join(", ")}. Tidak ada domain yang dihapus.`, pages_fetched: pagesFetched, api_total_pages: apiTotalPages, api_total_count: apiTotalCount }, 502);
+            }
+          }
+          if (!domainId) return json({ success: false, message: `Custom Domain ${hostname} ditemukan tanpa ID penghapusan, atau tidak ditemukan dalam daftar Cloudflare. Tidak ada domain yang dihapus.` }, 404);
+
+          const r = await fetch(`${accountBase}/workers/domains/${encodeURIComponent(domainId)}`, { method: "DELETE", headers: auth });
+          const raw = await r.text();
+          let d = {};
+          try { d = raw ? JSON.parse(raw) : {}; } catch { d = {}; }
+
+          // Cloudflare can remove the domain but return an empty/unexpected body.
+          // If the DELETE response is ambiguous, verify by querying the domain list.
+          if (r.ok && d.success === true) {
+            return json({ success: true, deleted: true, hostname, domainId, message: `Worker Custom Domain ${hostname} berhasil dihapus.` });
+          }
+
+          let verifiedDeleted = false;
+          try {
+            const verifyUrl = new URL(`${accountBase}/workers/domains`);
+            verifyUrl.searchParams.set("per_page", "100");
+            verifyUrl.searchParams.set("page", "1");
+            const verifyResponse = await fetch(verifyUrl.toString(), { headers: auth });
+            const verifyData = await verifyResponse.json().catch(() => ({}));
+            if (verifyResponse.ok && verifyData.success === true) {
+              const remaining = (Array.isArray(verifyData.result) ? verifyData.result : []).some(item =>
+                String(item.hostname || "").trim().toLowerCase() === hostname
+              );
+              verifiedDeleted = !remaining;
+            }
+          } catch { /* verification failed; report the original API response below */ }
+
+          if (verifiedDeleted) {
+            return json({
+              success: true,
+              deleted: true,
+              verified: true,
+              hostname,
+              domainId,
+              message: `Worker Custom Domain ${hostname} sudah terhapus di Cloudflare. Respons DELETE API tidak standar, tetapi penghapusan telah diverifikasi.`
+            });
+          }
+
+          const apiErrors = Array.isArray(d.errors) ? d.errors : [];
+          const apiMessage = errorsText(d) || (raw ? raw.slice(0, 500) : "Cloudflare mengembalikan respons kosong.");
+          return json({
+            success: false,
+            message: `Cloudflare DELETE belum dapat diverifikasi (HTTP ${r.status || 502}): ${apiMessage}`,
+            cloudflare_status: r.status || 502,
+            errors: apiErrors,
+            error_codes: apiErrors.map(e => e && e.code).filter(v => v !== undefined),
+            error_messages: apiErrors.map(e => e && e.message).filter(Boolean),
+            hostname,
+            domainId,
+            endpoint: `/accounts/{account_id}/workers/domains/{domainId}`
+          }, r.ok ? 502 : r.status || 502);
         }
         const zoneName = normalizeDomain(body.domain);
         if (!zoneName) return json({ success: false, message: "Masukkan nama zona yang valid." }, 400);
