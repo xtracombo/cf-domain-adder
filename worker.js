@@ -161,23 +161,17 @@ if (route === "/api/zones-list") {
 }
 if (route === "/api/pages-list") {
   try {
-    const all = [];
-    let page = 1;
-    let totalPages = 1;
-    while (page <= totalPages && page <= 100) {
-      const pagesUrl = new URL(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`);
-      pagesUrl.searchParams.set("per_page", "100");
-      pagesUrl.searchParams.set("page", String(page));
-      const response = await fetch(pagesUrl.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" } });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || data.success !== true) return json({ success: false, message: errorsText(data) || "Gagal mengambil daftar Cloudflare Pages.", errors: data.errors || [] }, response.status || 502);
-      all.push(...(Array.isArray(data.result) ? data.result : []));
-      const tp = Number(data.result_info?.total_pages);
-      if (Number.isFinite(tp) && tp > 0) totalPages = tp;
-      else if ((data.result || []).length < 100) totalPages = page;
-      page++;
+    // Cloudflare Pages projects endpoint does not accept the standard
+    // page/per_page query options in this account/API response. Request the
+    // collection without pagination parameters to avoid error 8000024.
+    const pagesUrl = new URL(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_ACCOUNT_ID)}/pages/projects`);
+    const response = await fetch(pagesUrl.toString(), { headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" } });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success !== true) {
+      return json({ success: false, message: errorsText(data) || "Gagal mengambil daftar Cloudflare Pages.", errors: data.errors || [] }, response.status || 502);
     }
-    return json({ success: true, result: all, result_info: { pages_fetched: Math.min(page - 1, 100), returned_count: all.length }, message: "Daftar Cloudflare Pages berhasil dimuat." });
+    const projects = Array.isArray(data.result) ? data.result : [];
+    return json({ success: true, result: projects, result_info: { returned_count: projects.length }, message: "Daftar Cloudflare Pages berhasil dimuat." });
   } catch {
     return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare Pages API." }, 502);
   }
@@ -196,9 +190,77 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
     const domain = normalizeDomain(body.domain);
     if (!domain) return json({ success: false, message: "Hostname/domain tidak valid." }, 400);
     if (route === "/api/pages-domain-create") {
-      const r = await fetch(projectBase, { method: "POST", headers: auth, body: JSON.stringify({ name: domain }) }); const d = await r.json().catch(() => ({}));
+      const r = await fetch(projectBase, { method: "POST", headers: auth, body: JSON.stringify({ name: domain }) });
+      const d = await r.json().catch(() => ({}));
       if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menambahkan domain ke Pages.", errors: d.errors || [] }, r.status || 502);
-      return json({ success: true, result: d.result || null, message: "Custom Domain Pages berhasil ditambahkan." });
+
+      // Automatically create the DNS CNAME needed by Pages, when this hostname
+      // belongs to a zone managed in the same Cloudflare account. Never overwrite
+      // an existing record that points somewhere else.
+      const dnsSetup = { attempted: false, created: false, status: "skipped", message: "DNS tidak dibuat otomatis." };
+      try {
+        const zonesUrl = new URL("https://api.cloudflare.com/client/v4/zones");
+        zonesUrl.searchParams.set("account.id", env.CF_ACCOUNT_ID);
+        zonesUrl.searchParams.set("per_page", "100");
+        zonesUrl.searchParams.set("page", "1");
+        const zonesResponse = await fetch(zonesUrl.toString(), { headers: auth });
+        const zonesData = await zonesResponse.json().catch(() => ({}));
+        if (zonesResponse.ok && zonesData.success === true) {
+          const zones = Array.isArray(zonesData.result) ? zonesData.result : [];
+          const zone = zones.filter(z => domain === z.name || domain.endsWith("." + z.name))
+            .sort((a, b) => String(b.name || "").length - String(a.name || "").length)[0];
+          if (zone) {
+            dnsSetup.attempted = true;
+            const recordName = domain;
+            const target = `${projectName}.pages.dev`;
+            const dnsBase = `https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(zone.id)}/dns_records`;
+            const searchUrl = new URL(dnsBase);
+            searchUrl.searchParams.set("name", recordName);
+            searchUrl.searchParams.set("per_page", "100");
+            const existingResponse = await fetch(searchUrl.toString(), { headers: auth });
+            const existingData = await existingResponse.json().catch(() => ({}));
+            if (!existingResponse.ok || existingData.success !== true) {
+              dnsSetup.status = "error";
+              dnsSetup.message = errorsText(existingData) || "Domain Pages ditambahkan, tetapi DNS record gagal diperiksa.";
+            } else {
+              const records = Array.isArray(existingData.result) ? existingData.result : [];
+              const same = records.find(rec => String(rec.type).toUpperCase() === "CNAME" && String(rec.content || "").replace(/\.$/, "").toLowerCase() === target.toLowerCase());
+              const conflict = records.find(rec => !same && (String(rec.type).toUpperCase() !== "TXT"));
+              if (same) {
+                dnsSetup.status = "existing";
+                dnsSetup.created = false;
+                dnsSetup.message = `DNS CNAME sudah ada dan mengarah ke ${target}.`;
+                dnsSetup.record = same;
+              } else if (conflict) {
+                dnsSetup.status = "conflict";
+                dnsSetup.message = `Domain Pages ditambahkan, tetapi DNS tidak diubah karena sudah ada record ${conflict.type} untuk ${recordName}. Periksa record itu sebelum menggantinya ke ${target}.`;
+              } else {
+                const createResponse = await fetch(dnsBase, { method: "POST", headers: auth, body: JSON.stringify({ type: "CNAME", name: recordName, content: target, ttl: 1, proxied: false }) });
+                const createData = await createResponse.json().catch(() => ({}));
+                if (createResponse.ok && createData.success === true) {
+                  dnsSetup.status = "created";
+                  dnsSetup.created = true;
+                  dnsSetup.message = `DNS CNAME otomatis dibuat: ${recordName} → ${target} (DNS only).`;
+                  dnsSetup.record = createData.result || null;
+                } else {
+                  dnsSetup.status = "error";
+                  dnsSetup.message = errorsText(createData) || "Domain Pages ditambahkan, tetapi pembuatan DNS CNAME gagal.";
+                }
+              }
+            }
+          } else {
+            dnsSetup.status = "zone-not-found";
+            dnsSetup.message = "Domain Pages ditambahkan, tetapi zona DNS yang cocok tidak ditemukan pada akun Cloudflare ini. DNS perlu dibuat manual.";
+          }
+        } else {
+          dnsSetup.status = "error";
+          dnsSetup.message = errorsText(zonesData) || "Domain Pages ditambahkan, tetapi daftar zona gagal dimuat untuk membuat DNS.";
+        }
+      } catch {
+        dnsSetup.status = "error";
+        dnsSetup.message = "Domain Pages berhasil ditambahkan, tetapi terjadi kesalahan saat menyiapkan DNS otomatis.";
+      }
+      return json({ success: true, result: d.result || null, dns: dnsSetup, message: "Custom Domain Pages berhasil ditambahkan." });
     }
     const r = await fetch(`${projectBase}/${encodeURIComponent(domain)}`, { method: "DELETE", headers: auth }); const d = await r.json().catch(() => ({}));
     if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus domain dari Pages.", errors: d.errors || [] }, r.status || 502);
