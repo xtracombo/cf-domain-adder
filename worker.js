@@ -277,10 +277,105 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
         if (route === "/api/worker-domain-delete") {
           const hostname = normalizeDomain(body.hostname);
           if (!hostname) return json({ success: false, message: "Hostname tidak valid." }, 400);
-          const r = await fetch(`${accountBase}/workers/domains/${encodeURIComponent(hostname)}`, { method: "DELETE", headers: auth });
-          const d = await r.json().catch(() => ({}));
-          if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus Worker Custom Domain.", errors: d.errors || [] }, r.status || 502);
-          return json({ success: true, deleted: true, message: "Worker Custom Domain berhasil dihapus." });
+
+          // Cloudflare's DELETE endpoint expects the Custom Domain ID, not its hostname.
+          // Resolve the ID from the account's Custom Domains list before deleting.
+          let domainId = typeof body.domainId === "string" ? body.domainId.trim() : "";
+          if (!domainId) {
+            // Some Cloudflare responses omit result_info.total_pages. In that case,
+            // keep paging while the page is full; do not assume page 1 is the only page.
+            const perPage = 100;
+            const maxPages = 1000;
+            let page = 1;
+            let pagesFetched = 0;
+            let apiTotalPages = null;
+            let apiTotalCount = null;
+            let foundDomain = null;
+            while (page <= maxPages) {
+              const listUrl = new URL(`${accountBase}/workers/domains`);
+              listUrl.searchParams.set("per_page", String(perPage));
+              listUrl.searchParams.set("page", String(page));
+              const listResponse = await fetch(listUrl.toString(), { headers: auth });
+              const listData = await listResponse.json().catch(() => ({}));
+              if (!listResponse.ok || listData.success !== true) {
+                return json({ success: false, message: errorsText(listData) || `Gagal mencari Custom Domain pada halaman ${page} sebelum penghapusan.`, errors: listData.errors || [], pages_fetched: pagesFetched }, listResponse.status || 502);
+              }
+              pagesFetched++;
+              const items = Array.isArray(listData.result) ? listData.result : [];
+              const info = listData.result_info || {};
+              const totalPagesValue = Number(info.total_pages);
+              const totalCountValue = Number(info.total_count);
+              if (Number.isFinite(totalPagesValue) && totalPagesValue > 0) apiTotalPages = totalPagesValue;
+              if (Number.isFinite(totalCountValue) && totalCountValue >= 0) apiTotalCount = totalCountValue;
+              foundDomain = items.find(item => String(item.hostname || "").trim().toLowerCase() === hostname) || null;
+              if (foundDomain) {
+                domainId = String(foundDomain.id || "").trim();
+                break;
+              }
+              if (items.length === 0) break;
+              if (apiTotalPages !== null && page >= apiTotalPages) break;
+              if (apiTotalPages === null && items.length < perPage) break;
+              page++;
+            }
+            if (!domainId && page > maxPages) {
+              return json({ success: false, message: `Pencarian Custom Domain dihentikan setelah ${maxPages} halaman. Domain tidak dihapus karena hasil pencarian belum dipastikan lengkap.`, pages_fetched: pagesFetched, api_total_pages: apiTotalPages, api_total_count: apiTotalCount }, 502);
+            }
+            if (foundDomain && !domainId) {
+              return json({ success: false, message: `Custom Domain ${hostname} ditemukan pada daftar Cloudflare tetapi responsnya tidak memiliki ID penghapusan. Kunci yang tersedia: ${Object.keys(foundDomain).join(", ")}. Tidak ada domain yang dihapus.`, pages_fetched: pagesFetched, api_total_pages: apiTotalPages, api_total_count: apiTotalCount }, 502);
+            }
+          }
+          if (!domainId) return json({ success: false, message: `Custom Domain ${hostname} ditemukan tanpa ID penghapusan, atau tidak ditemukan dalam daftar Cloudflare. Tidak ada domain yang dihapus.` }, 404);
+
+          const r = await fetch(`${accountBase}/workers/domains/${encodeURIComponent(domainId)}`, { method: "DELETE", headers: auth });
+          const raw = await r.text();
+          let d = {};
+          try { d = raw ? JSON.parse(raw) : {}; } catch { d = {}; }
+
+          // Cloudflare can remove the domain but return an empty/unexpected body.
+          // If the DELETE response is ambiguous, verify by querying the domain list.
+          if (r.ok && d.success === true) {
+            return json({ success: true, deleted: true, hostname, domainId, message: `Worker Custom Domain ${hostname} berhasil dihapus.` });
+          }
+
+          let verifiedDeleted = false;
+          try {
+            const verifyUrl = new URL(`${accountBase}/workers/domains`);
+            verifyUrl.searchParams.set("per_page", "100");
+            verifyUrl.searchParams.set("page", "1");
+            const verifyResponse = await fetch(verifyUrl.toString(), { headers: auth });
+            const verifyData = await verifyResponse.json().catch(() => ({}));
+            if (verifyResponse.ok && verifyData.success === true) {
+              const remaining = (Array.isArray(verifyData.result) ? verifyData.result : []).some(item =>
+                String(item.hostname || "").trim().toLowerCase() === hostname
+              );
+              verifiedDeleted = !remaining;
+            }
+          } catch { /* verification failed; report the original API response below */ }
+
+          if (verifiedDeleted) {
+            return json({
+              success: true,
+              deleted: true,
+              verified: true,
+              hostname,
+              domainId,
+              message: `Worker Custom Domain ${hostname} sudah terhapus di Cloudflare. Respons DELETE API tidak standar, tetapi penghapusan telah diverifikasi.`
+            });
+          }
+
+          const apiErrors = Array.isArray(d.errors) ? d.errors : [];
+          const apiMessage = errorsText(d) || (raw ? raw.slice(0, 500) : "Cloudflare mengembalikan respons kosong.");
+          return json({
+            success: false,
+            message: `Cloudflare DELETE belum dapat diverifikasi (HTTP ${r.status || 502}): ${apiMessage}`,
+            cloudflare_status: r.status || 502,
+            errors: apiErrors,
+            error_codes: apiErrors.map(e => e && e.code).filter(v => v !== undefined),
+            error_messages: apiErrors.map(e => e && e.message).filter(Boolean),
+            hostname,
+            domainId,
+            endpoint: `/accounts/{account_id}/workers/domains/{domainId}`
+          }, r.ok ? 502 : r.status || 502);
         }
         const zoneName = normalizeDomain(body.domain);
         if (!zoneName) return json({ success: false, message: "Masukkan nama zona yang valid." }, 400);
