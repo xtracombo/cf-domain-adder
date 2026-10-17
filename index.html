@@ -29,6 +29,25 @@
 .domain-editor-card .actions .btn{min-height:44px;padding:11px 10px}
 .module-select{font-size:16px}
 }
+
+/* UX v4: consistent micro-interactions and readable feedback */
+:where(.btn,.ghost,.quick button,.nav,.module-select,select,input,.result,.notice){transition:border-color .18s ease,background-color .18s ease,box-shadow .18s ease,filter .18s ease,transform .18s ease}
+:where(button,a,input,select,textarea,[tabindex]):focus-visible{outline:2px solid #9cafff;outline-offset:3px}
+button:disabled{filter:saturate(.65);opacity:.62;cursor:wait}
+.btn:not(:disabled):active,.ghost:not(:disabled):active,.quick button:active{transform:translateY(1px) scale(.99)}
+.card{transition:border-color .18s ease,box-shadow .18s ease}
+@media(hover:hover){.card:hover{border-color:#344565}.nav:not(.active):hover{border-color:#2c3c5c}.quick button:hover{transform:translateY(-1px)}}
+.notice,.result:not(:empty){animation:uxFeedbackIn .2s ease-out both}
+.notice{overflow-wrap:anywhere}
+.result[role="status"],.result[role="alert"]{border-left-width:3px}
+.result[role="status"]{border-left-color:#6c8fff}
+.result[role="alert"]{border-left-color:#ff6b88}
+.placeholder .big{display:inline-grid;place-items:center;width:68px;height:68px;border-radius:20px;background:#1b2a49;color:#a9b7ff;margin-bottom:14px}
+.field input:disabled,.field select:disabled{opacity:.65;cursor:wait}
+@keyframes uxFeedbackIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:600px){.btn,.ghost{min-height:44px}.actions .btn{flex:0 0 auto}.notice,.result{overflow-wrap:anywhere}}
+@media(prefers-reduced-motion:reduce){:where(.btn,.ghost,.quick button,.nav,.module-select,select,input,.result,.notice,.card){transition:none!important;animation:none!important}}
+
 </style>
 </head>
 <body>
