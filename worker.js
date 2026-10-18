@@ -1,5 +1,6 @@
 const ALLOWED_ORIGIN = "https://xtracombo.github.io";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
+const PBKDF2_ITERATIONS = 210000;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -50,6 +51,55 @@ async function verifySession(token, secret) {
     return typeof payload.sub === "string" && payload.exp > Math.floor(Date.now() / 1000);
   } catch { return false; }
 }
+async function sha256Hex(value) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  return [...digest].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function randomId(bytes = 24) {
+  const data = crypto.getRandomValues(new Uint8Array(bytes));
+  return [...data].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function hashPassword(password, salt = randomId(16)) {
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" }, material, 256);
+  return `pbkdf2-sha256$${PBKDF2_ITERATIONS}$${salt}$${base64url(new Uint8Array(bits))}`;
+}
+async function verifyPassword(password, stored) {
+  try {
+    const [scheme, rounds, salt, expected] = stored.split("$");
+    if (scheme !== "pbkdf2-sha256" || Number(rounds) < 100000 || Number(rounds) > 1000000) return false;
+    const actual = await hashPassword(password, salt);
+    const parts = actual.split("$");
+    return parts[3].length === expected.length && parts[3] === expected;
+  } catch { return false; }
+}
+async function encryptToken(token, secret) {
+  const keyBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(token)));
+  return `v1.${base64url(iv)}.${base64url(ciphertext)}`;
+}
+async function decryptToken(value, secret) {
+  const [version, ivText, dataText] = String(value || "").split(".");
+  if (version !== "v1" || !ivText || !dataText) throw new Error("Format token terenkripsi tidak valid.");
+  const keyBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
+  const decode = text => Uint8Array.from(atob(text.replace(/-/g,"+").replace(/_/g,"/") + "=".repeat((4-text.length%4)%4)), c => c.charCodeAt(0));
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: decode(ivText) }, key, decode(dataText));
+  return new TextDecoder().decode(plain);
+}
+async function consumeRateLimit(env, key, limit, windowSeconds) {
+  const now = Math.floor(Date.now() / 1000), expires = now + windowSeconds;
+  const row = await env.DB.prepare(`INSERT INTO rate_limits (rate_key, attempts, window_started_at, expires_at) VALUES (?, 1, ?, ?) ON CONFLICT(rate_key) DO UPDATE SET attempts = CASE WHEN rate_limits.expires_at <= ? THEN 1 ELSE rate_limits.attempts + 1 END, window_started_at = CASE WHEN rate_limits.expires_at <= ? THEN excluded.window_started_at ELSE rate_limits.window_started_at END, expires_at = CASE WHEN rate_limits.expires_at <= ? THEN excluded.expires_at ELSE rate_limits.expires_at END RETURNING attempts, expires_at`).bind(key, now, expires, now, now, now).first();
+  return { allowed: Number(row?.attempts || 0) <= limit, attempts: Number(row?.attempts || 0), expiresAt: Number(row?.expires_at || expires) };
+}
+async function audit(env, actorId, action, targetType = null, targetId = null, result = "success", details = null) {
+  try { await env.DB.prepare("INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, result, details_json) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(randomId(16), actorId || null, action, targetType, targetId, result, details ? JSON.stringify(details) : null).run(); } catch {}
+}
+function validEmail(email) { return typeof email === "string" && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+function validUsername(username) { return typeof username === "string" && /^[a-zA-Z0-9_.-]{3,32}$/.test(username); }
+
 function normalizeDomain(input) {
   if (typeof input !== "string") return null;
   let value = input.trim().toLowerCase();
@@ -90,51 +140,129 @@ export default {
     if (!allowed) return json({ success: false, message: "Origin tidak diizinkan." }, 403);
     const route = new URL(request.url).pathname;
     const knownRoutes = [
-  "/api/login",
-  "/api/add-domain",
-  "/api/check-domain",
-  "/api/delete-domain",
-  "/api/dns-list",
-  "/api/dns-create",
-  "/api/dns-update",
-  "/api/dns-delete",
-  "/api/workers-list",
-  "/api/worker-domains-list",
-  "/api/worker-domain-create",
-  "/api/worker-domain-delete",
-  "/api/pages-domains-list",
-  "/api/pages-domain-create",
-  "/api/pages-domain-delete",
-  "/api/worker-routes-list",
-  "/api/worker-route-create",
-  "/api/worker-route-delete",
-  "/api/pages-list",
-  "/api/zones-list"
-];
+      "/api/register", "/api/login", "/api/logout", "/api/me", "/api/connect-cloudflare", "/api/disconnect-cloudflare",
+      "/api/admin/users", "/api/admin/audit",
+      "/api/add-domain", "/api/check-domain", "/api/delete-domain", "/api/dns-list", "/api/dns-create", "/api/dns-update", "/api/dns-delete",
+      "/api/workers-list", "/api/worker-domains-list", "/api/worker-domain-create", "/api/worker-domain-delete",
+      "/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-delete", "/api/worker-routes-list", "/api/worker-route-create", "/api/worker-route-delete", "/api/pages-list", "/api/zones-list"
+    ];
     if (!knownRoutes.includes(route)) return json({ success: false, message: "Not found." }, 404);
     if (request.method !== "POST") return json({ success: false, message: "Method not allowed." }, 405);
-
-    if (route === "/api/login") {
-      if (!env.APP_USERNAME || !env.APP_PASSWORD || !env.SESSION_SECRET) {
-        return json({ success: false, message: "Konfigurasi login belum lengkap. Atur APP_USERNAME, APP_PASSWORD, dan SESSION_SECRET sebagai Secrets." }, 500);
-      }
-      let credentials;
-      try { credentials = await request.json(); } catch { return json({ success: false, message: "Body JSON tidak valid." }, 400); }
-      if (typeof credentials.username !== "string" || typeof credentials.password !== "string" || credentials.username !== env.APP_USERNAME || credentials.password !== env.APP_PASSWORD) {
-        return json({ success: false, message: "Username atau password salah." }, 401);
-      }
-      return json({ success: true, token: await createSession(env.APP_USERNAME, env.SESSION_SECRET), expiresIn: SESSION_TTL_SECONDS, message: "Login berhasil." });
-    }
-
-    if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID || !env.SESSION_SECRET) {
-      return json({ success: false, message: "Konfigurasi Worker belum lengkap. Periksa CF_API_TOKEN, CF_ACCOUNT_ID, dan SESSION_SECRET." }, 500);
-    }
-    const sessionToken = request.headers.get("X-Session-Token") || "";
-    if (!(await verifySession(sessionToken, env.SESSION_SECRET))) {
-      return json({ success: false, message: "Sesi login tidak valid atau sudah berakhir. Silakan login kembali." }, 401);
-    }
+    if (!env.DB || !env.SESSION_SECRET) return json({ success: false, message: "Konfigurasi backend belum lengkap. Pastikan binding D1 bernama DB dan Secret SESSION_SECRET tersedia." }, 500);
     let body;
     try { body = await request.json(); } catch { return json({ success: false, message: "Body JSON tidak valid." }, 400); }
+
+    if (route === "/api/register") {
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      const rate = await consumeRateLimit(env, `register:${await sha256Hex(ip)}`, 5, 3600);
+      if (!rate.allowed) return json({ success: false, message: "Terlalu banyak percobaan pendaftaran. Coba lagi sekitar satu jam lagi." }, 429);
+      const username = typeof body.username === "string" ? body.username.trim() : "";
+      const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      if (!validUsername(username)) return json({ success: false, message: "Username harus 3–32 karakter: huruf, angka, titik, garis bawah, atau tanda hubung." }, 400);
+      if (!validEmail(email)) return json({ success: false, message: "Alamat email tidak valid." }, 400);
+      if (password.length < 12 || password.length > 256) return json({ success: false, message: "Password harus minimal 12 karakter." }, 400);
+      const exists = await env.DB.prepare("SELECT id FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE LIMIT 1").bind(username, email).first();
+      if (exists) return json({ success: false, message: "Username atau email sudah terdaftar." }, 409);
+      const id = randomId(16), passwordHash = await hashPassword(password);
+      try {
+        await env.DB.prepare("INSERT INTO users (id, username, email, password_hash, role, status) VALUES (?, ?, ?, ?, 'user', 'active')").bind(id, username, email, passwordHash).run();
+        await audit(env, id, "user.register", "user", id);
+        return json({ success: true, message: "Pendaftaran berhasil. Silakan login." }, 201);
+      } catch { return json({ success: false, message: "Pendaftaran gagal. Username atau email mungkin sudah digunakan." }, 409); }
+    }
+
+    if (route === "/api/login") {
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      const rate = await consumeRateLimit(env, `login:${await sha256Hex(ip)}`, 10, 900);
+      if (!rate.allowed) return json({ success: false, message: "Terlalu banyak percobaan login. Coba lagi dalam beberapa menit." }, 429);
+      const login = typeof body.login === "string" ? body.login.trim() : (typeof body.username === "string" ? body.username.trim() : "");
+      const password = typeof body.password === "string" ? body.password : "";
+      if (!login || !password) return json({ success: false, message: "Masukkan username/email dan password." }, 400);
+      const user = await env.DB.prepare("SELECT id, username, email, password_hash, role, status FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE LIMIT 1").bind(login, login).first();
+      if (!user || user.status !== "active" || !(await verifyPassword(password, user.password_hash))) {
+        await audit(env, user?.id || null, "user.login", "user", user?.id || null, "failure", { reason: "invalid_credentials" });
+        return json({ success: false, message: "Username/email atau password salah, atau akun dinonaktifkan." }, 401);
+      }
+      const token = randomId(32), tokenHash = await sha256Hex(token), sessionId = randomId(16);
+      const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
+      await env.DB.prepare("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)").bind(sessionId, user.id, tokenHash, expiresAt).run();
+      await env.DB.prepare("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?").bind(user.id).run();
+      await audit(env, user.id, "user.login", "user", user.id);
+      return json({ success: true, token, expiresIn: SESSION_TTL_SECONDS, user: { id: user.id, username: user.username, email: user.email, role: user.role }, message: "Login berhasil." });
+    }
+
+    const sessionToken = request.headers.get("X-Session-Token") || "";
+    if (!sessionToken) return json({ success: false, message: "Silakan login terlebih dahulu." }, 401);
+    const tokenHash = await sha256Hex(sessionToken);
+    const session = await env.DB.prepare("SELECT s.id AS session_id, s.user_id, s.expires_at, u.username, u.email, u.role, u.status FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? LIMIT 1").bind(tokenHash).first();
+    if (!session || session.status !== "active" || Date.parse(session.expires_at) <= Date.now()) {
+      if (session) await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(session.session_id).run();
+      return json({ success: false, message: "Sesi tidak valid atau sudah berakhir. Silakan login kembali." }, 401);
+    }
+    const userId = session.user_id;
+    if (route === "/api/logout") {
+      await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(session.session_id).run();
+      await audit(env, userId, "user.logout", "user", userId);
+      return json({ success: true, message: "Logout berhasil." });
+    }
+    if (route === "/api/me") {
+      const connection = await env.DB.prepare("SELECT id, account_id, status, created_at, updated_at FROM cloudflare_connections WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").bind(userId).first();
+      return json({ success: true, user: { id: userId, username: session.username, email: session.email, role: session.role }, connection: connection ? { connected: true, accountId: connection.account_id, status: connection.status } : { connected: false } });
+    }
+    if (route === "/api/connect-cloudflare") {
+      const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
+      const apiToken = typeof body.apiToken === "string" ? body.apiToken.trim() : "";
+      if (!/^[a-f0-9]{32}$/i.test(accountId)) return json({ success: false, message: "Account ID harus berupa 32 karakter heksadesimal." }, 400);
+      if (apiToken.length < 20 || apiToken.length > 512 || /\s/.test(apiToken)) return json({ success: false, message: "API Token tidak valid. Tempel token Cloudflare tanpa spasi." }, 400);
+      if (!env.TOKEN_ENCRYPTION_KEY || env.TOKEN_ENCRYPTION_KEY.length < 32) return json({ success: false, message: "Admin perlu mengatur Secret TOKEN_ENCRYPTION_KEY (minimal 32 karakter) sebelum koneksi dapat disimpan." }, 500);
+      const auth = { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" };
+      const verifyResponse = await fetch("https://api.cloudflare.com/client/v4/user/tokens/verify", { headers: auth });
+      const verifyData = await verifyResponse.json().catch(() => ({}));
+      const accountResponse = verifyData.success === true && verifyData.result?.status === "active"
+        ? await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/workers/scripts?per_page=1`, { headers: auth })
+        : null;
+      const accountData = accountResponse ? await accountResponse.json().catch(() => ({})) : {};
+      if (!verifyResponse.ok || verifyData.success !== true || verifyData.result?.status !== "active" || !accountResponse?.ok || accountData.success !== true) {
+        await audit(env, userId, "cloudflare.connect", "cloudflare_account", accountId, "failure", { httpStatus: verifyResponse.status });
+        return json({ success: false, message: "Cloudflare menolak koneksi. Periksa Account ID, API Token, dan permission token." }, 400);
+      }
+      const encrypted = await encryptToken(apiToken, env.TOKEN_ENCRYPTION_KEY);
+      const existing = await env.DB.prepare("SELECT id FROM cloudflare_connections WHERE user_id = ? AND account_id = ? LIMIT 1").bind(userId, accountId).first();
+      if (existing) {
+        await env.DB.prepare("UPDATE cloudflare_connections SET encrypted_token = ?, token_key_version = 'v1', status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(encrypted, existing.id).run();
+      } else {
+        await env.DB.prepare("INSERT INTO cloudflare_connections (id, user_id, account_id, encrypted_token, token_key_version, status) VALUES (?, ?, ?, ?, 'v1', 'active')").bind(randomId(16), userId, accountId, encrypted).run();
+      }
+      await audit(env, userId, "cloudflare.connect", "cloudflare_account", accountId);
+      return json({ success: true, message: "Akun Cloudflare berhasil diverifikasi dan dihubungkan.", accountId });
+    }
+    if (route === "/api/disconnect-cloudflare") {
+      const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
+      if (accountId) await env.DB.prepare("DELETE FROM cloudflare_connections WHERE user_id = ? AND account_id = ?").bind(userId, accountId).run();
+      else await env.DB.prepare("DELETE FROM cloudflare_connections WHERE user_id = ?").bind(userId).run();
+      await audit(env, userId, "cloudflare.disconnect", "cloudflare_account", accountId || null);
+      return json({ success: true, message: "Koneksi Cloudflare dihapus dari Club Gratis." });
+    }
+    if (route === "/api/admin/users" || route === "/api/admin/audit") {
+      if (session.role !== "admin") return json({ success: false, message: "Akses khusus Admin." }, 403);
+      if (route === "/api/admin/users") {
+        const rows = await env.DB.prepare("SELECT u.id, u.username, u.email, u.role, u.status, u.created_at, u.last_login_at, c.account_id AS cloudflare_account_id, c.status AS connection_status FROM users u LEFT JOIN cloudflare_connections c ON c.user_id = u.id ORDER BY u.created_at DESC LIMIT 200").all();
+        return json({ success: true, result: rows.results || [] });
+      }
+      const rows = await env.DB.prepare("SELECT id, actor_user_id, action, target_type, target_id, result, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 200").all();
+      return json({ success: true, result: rows.results || [] });
+    }
+
+    const connection = await env.DB.prepare("SELECT account_id, encrypted_token, status FROM cloudflare_connections WHERE user_id = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 1").bind(userId).first();
+    if (!connection) return json({ success: false, message: "Hubungkan akun Cloudflare terlebih dahulu melalui panel Koneksi Cloudflare." }, 409);
+    if (!env.TOKEN_ENCRYPTION_KEY) return json({ success: false, message: "Secret TOKEN_ENCRYPTION_KEY belum dikonfigurasi." }, 500);
+    let userApiToken;
+    try { userApiToken = await decryptToken(connection.encrypted_token, env.TOKEN_ENCRYPTION_KEY); }
+    catch { return json({ success: false, message: "Token tersimpan tidak dapat dibuka. Hubungkan ulang akun Cloudflare." }, 500); }
+    // Reuse existing feature handlers, but inject only this authenticated user's credentials.
+    env = Object.assign(Object.create(Object.getPrototypeOf(env)), env, { CF_ACCOUNT_ID: connection.account_id, CF_API_TOKEN: userApiToken });
+
   // Cloudflare Pages management endpoints.
 if (route === "/api/zones-list") {
   try {
