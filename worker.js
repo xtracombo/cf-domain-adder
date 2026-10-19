@@ -66,11 +66,19 @@ async function hashPassword(password, salt = randomId(16)) {
 }
 async function verifyPassword(password, stored) {
   try {
-    const [scheme, rounds, salt, expected] = stored.split("$");
-    if (scheme !== "pbkdf2-sha256" || Number(rounds) < 100000 || Number(rounds) > 1000000) return false;
-    const actual = await hashPassword(password, salt);
-    const parts = actual.split("$");
-    return parts[3].length === expected.length && parts[3] === expected;
+    const [scheme, roundsText, salt, expected] = stored.split("$");
+    const rounds = Number(roundsText);
+    if (scheme !== "pbkdf2-sha256" || !Number.isInteger(rounds) || rounds < 100000 || rounds > 1000000 || !salt || !expected) return false;
+    const material = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]
+    );
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: rounds, hash: "SHA-256" },
+      material,
+      256
+    );
+    const actual = base64url(new Uint8Array(bits));
+    return actual.length === expected.length && actual === expected;
   } catch { return false; }
 }
 async function encryptToken(token, secret) {
