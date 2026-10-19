@@ -1,6 +1,6 @@
 const ALLOWED_ORIGIN = "https://xtracombo.github.io";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
-const PBKDF2_ITERATIONS = 210000;
+const PBKDF2_ITERATIONS = 100000; // Cloudflare Workers WebCrypto limit
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -59,18 +59,23 @@ function randomId(bytes = 24) {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
   return [...data].map(b => b.toString(16).padStart(2, "0")).join("");
 }
-async function hashPassword(password, salt = randomId(16)) {
+async function hashPassword(password, salt = randomId(16), iterations = PBKDF2_ITERATIONS) {
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" }, material, 256);
-  return `pbkdf2-sha256$${PBKDF2_ITERATIONS}$${salt}$${base64url(new Uint8Array(bits))}`;
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations, hash: "SHA-256" }, material, 256);
+  return `pbkdf2-sha256$${iterations}$${salt}$${base64url(new Uint8Array(bits))}`;
 }
 async function verifyPassword(password, stored) {
   try {
-    const [scheme, rounds, salt, expected] = stored.split("$");
-    if (scheme !== "pbkdf2-sha256" || Number(rounds) < 100000 || Number(rounds) > 1000000) return false;
-    const actual = await hashPassword(password, salt);
-    const parts = actual.split("$");
-    return parts[3].length === expected.length && parts[3] === expected;
+    const [scheme, roundsText, salt, expected] = String(stored || "").split("$");
+    const rounds = Number(roundsText);
+    // Cloudflare WebCrypto rejects PBKDF2 iteration counts above 100000.
+    if (scheme !== "pbkdf2-sha256" || !Number.isInteger(rounds) || rounds < 100000 || rounds > PBKDF2_ITERATIONS || !salt || !expected) return false;
+    const actual = await hashPassword(password, salt, rounds);
+    const actualHash = actual.split("$")[3];
+    if (actualHash.length !== expected.length) return false;
+    let diff = 0;
+    for (let i = 0; i < actualHash.length; i++) diff |= actualHash.charCodeAt(i) ^ expected.charCodeAt(i);
+    return diff === 0;
   } catch { return false; }
 }
 async function encryptToken(token, secret) {
