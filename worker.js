@@ -1,6 +1,6 @@
 const ALLOWED_ORIGIN = "https://xtracombo.github.io";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
-const PBKDF2_ITERATIONS = 100000; // Cloudflare Workers WebCrypto limit
+const PBKDF2_ITERATIONS = 210000;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -59,23 +59,18 @@ function randomId(bytes = 24) {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
   return [...data].map(b => b.toString(16).padStart(2, "0")).join("");
 }
-async function hashPassword(password, salt = randomId(16), iterations = PBKDF2_ITERATIONS) {
+async function hashPassword(password, salt = randomId(16)) {
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations, hash: "SHA-256" }, material, 256);
-  return `pbkdf2-sha256$${iterations}$${salt}$${base64url(new Uint8Array(bits))}`;
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" }, material, 256);
+  return `pbkdf2-sha256$${PBKDF2_ITERATIONS}$${salt}$${base64url(new Uint8Array(bits))}`;
 }
 async function verifyPassword(password, stored) {
   try {
-    const [scheme, roundsText, salt, expected] = String(stored || "").split("$");
-    const rounds = Number(roundsText);
-    // Cloudflare WebCrypto rejects PBKDF2 iteration counts above 100000.
-    if (scheme !== "pbkdf2-sha256" || !Number.isInteger(rounds) || rounds < 100000 || rounds > PBKDF2_ITERATIONS || !salt || !expected) return false;
-    const actual = await hashPassword(password, salt, rounds);
-    const actualHash = actual.split("$")[3];
-    if (actualHash.length !== expected.length) return false;
-    let diff = 0;
-    for (let i = 0; i < actualHash.length; i++) diff |= actualHash.charCodeAt(i) ^ expected.charCodeAt(i);
-    return diff === 0;
+    const [scheme, rounds, salt, expected] = stored.split("$");
+    if (scheme !== "pbkdf2-sha256" || Number(rounds) < 100000 || Number(rounds) > 1000000) return false;
+    const actual = await hashPassword(password, salt);
+    const parts = actual.split("$");
+    return parts[3].length === expected.length && parts[3] === expected;
   } catch { return false; }
 }
 async function encryptToken(token, secret) {
@@ -255,7 +250,7 @@ export default {
         const rows = await env.DB.prepare("SELECT u.id, u.username, u.email, u.role, u.status, u.created_at, u.last_login_at, c.account_id AS cloudflare_account_id, c.status AS connection_status FROM users u LEFT JOIN cloudflare_connections c ON c.user_id = u.id ORDER BY u.created_at DESC LIMIT 200").all();
         return json({ success: true, result: rows.results || [] });
       }
-      const rows = await env.DB.prepare("SELECT id, actor_user_id, action, target_type, target_id, result, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 200").all();
+      const rows = await env.DB.prepare("SELECT a.id, a.actor_user_id, u.username AS actor_username, a.action, a.target_type, a.target_id, a.result, a.details_json, a.created_at FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id ORDER BY a.created_at DESC LIMIT 200").all();
       return json({ success: true, result: rows.results || [] });
     }
 
@@ -397,6 +392,7 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
     }
     const r = await fetch(`${projectBase}/${encodeURIComponent(domain)}`, { method: "DELETE", headers: auth }); const d = await r.json().catch(() => ({}));
     if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus domain dari Pages.", errors: d.errors || [] }, r.status || 502);
+    await audit(env, userId, "pages.domain.delete", "pages_domain", domain, "success", { projectName, domain });
     return json({ success: true, deleted: true, message: "Domain berhasil dihapus dari Pages." });
   } catch {
     return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare Pages API." }, 502);
@@ -467,6 +463,7 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
           const r = await fetch(`${accountBase}/workers/domains`, { method: "PUT", headers: auth, body: JSON.stringify(payload) });
           const d = await r.json().catch(() => ({}));
           if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membuat Worker Custom Domain.", errors: d.errors || [] }, r.status || 502);
+          await audit(env, userId, "worker.domain.create", "worker_domain", hostname, "success", { hostname, service });
           return json({ success: true, result: d.result || null, message: "Permintaan Custom Domain berhasil." });
         }
         if (route === "/api/worker-domain-delete") {
@@ -529,6 +526,7 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
           // Cloudflare can remove the domain but return an empty/unexpected body.
           // If the DELETE response is ambiguous, verify by querying the domain list.
           if (r.ok && d.success === true) {
+            await audit(env, userId, "worker.domain.delete", "worker_domain", hostname, "success", { hostname, domainId });
             return json({ success: true, deleted: true, hostname, domainId, message: `Worker Custom Domain ${hostname} berhasil dihapus.` });
           }
 
@@ -598,6 +596,7 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
           }
           const r = await fetch(routesBase, { method: "POST", headers: auth, body: JSON.stringify({ pattern, script }) }); const d = await r.json().catch(() => ({}));
           if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal membuat Workers Route.", errors: d.errors || [] }, r.status || 502);
+          await audit(env, userId, "worker.route.create", "worker_route", pattern, "success", { zone: zone.name, pattern, script });
           return json({ success: true, zone: zone.name, result: d.result || null, message: "Workers Route berhasil dibuat." });
         }
         if (route === "/api/worker-route-delete") {
@@ -605,6 +604,7 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
           if (!/^[a-f0-9-]{16,64}$/i.test(routeId)) return json({ success: false, message: "ID route tidak valid." }, 400);
           const r = await fetch(`${routesBase}/${encodeURIComponent(routeId)}`, { method: "DELETE", headers: auth }); const d = await r.json().catch(() => ({}));
           if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus Workers Route.", errors: d.errors || [] }, r.status || 502);
+          await audit(env, userId, "worker.route.delete", "worker_route", routeId, "success", { routeId });
           return json({ success: true, deleted: true, message: "Workers Route berhasil dihapus." });
         }
       } catch { return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare Workers API." }, 502); }
@@ -640,6 +640,7 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
         if (route === "/api/dns-delete") {
           const r = await fetch(`${base}/${encodeURIComponent(body.recordId)}`, { method: "DELETE", headers: auth }); const d = await r.json().catch(() => ({}));
           if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || "Gagal menghapus DNS record.", errors: d.errors || [] }, r.status || 502);
+          await audit(env, userId, "dns.record.delete", "dns_record", body.recordId, "success", { zone: zone.name, recordId: body.recordId });
           return json({ success: true, deleted: true, zone: zone.name, recordId: body.recordId, message: "DNS record berhasil dihapus." });
         }
         const allowedTypes = ["A", "AAAA", "CNAME", "TXT", "MX", "SRV", "CAA", "NS"];
@@ -658,6 +659,7 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
         const r = await fetch(isUpdate ? `${base}/${encodeURIComponent(body.recordId)}` : base, { method: isUpdate ? "PUT" : "POST", headers: auth, body: JSON.stringify(record) });
         const d = await r.json().catch(() => ({}));
         if (!r.ok || d.success !== true) return json({ success: false, message: errorsText(d) || (isUpdate ? "Gagal memperbarui DNS record." : "Gagal membuat DNS record."), errors: d.errors || [] }, r.status || 502);
+        await audit(env, userId, isUpdate ? "dns.record.update" : "dns.record.create", "dns_record", d.result?.id || body.recordId || null, "success", { zone: zone.name, type, name, content, proxied: record.proxied });
         return json({ success: true, zone: zone.name, result: d.result || null, message: isUpdate ? "DNS record berhasil diperbarui." : "DNS record berhasil dibuat." });
       } catch { return json({ success: false, message: "Tidak berhasil menghubungi Cloudflare API." }, 502); }
     }
@@ -688,6 +690,7 @@ if (["/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-d
           if (!deleteResponse.ok || deletion.success !== true) {
             return json({ success: false, message: errorsText(deletion) || "Cloudflare gagal menghapus zona.", errors: deletion.errors || [], messages: deletion.messages || [] }, deleteResponse.status || 502);
           }
+          await audit(env, userId, "domain.delete", "zone", zone.id, "success", { domain: zone.name });
           return json({ success: true, deleted: true, domain: zone.name, id: zone.id, message: "Zona berhasil dihapus dari akun Cloudflare." });
         }
         return json({ success: true, found: true, domain: zone.name, result: {
