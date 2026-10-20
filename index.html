@@ -147,6 +147,46 @@ html[data-theme="light"] body{background:radial-gradient(900px 500px at 80% -10%
 }
 @media(prefers-reduced-motion:reduce){.profile-shortcut::before{transition:none}}
 
+
+/* Mobile polish v4: form controls, safe scrolling, and touch-friendly actions */
+html{scroll-padding-top:88px;scroll-behavior:smooth}
+#cloudflareConnectionCard{scroll-margin-top:88px}
+#connectionStatus,#connectionMessage{overflow-wrap:anywhere;word-break:break-word;min-width:0}
+#connectionForm{min-width:0}
+#connectionForm .form-grid{min-width:0}
+#connectionForm .field{min-width:0}
+#connectionForm input{min-width:0;max-width:100%;text-overflow:ellipsis}
+#connectionForm details summary{line-height:1.5}
+button:focus-visible,.nav:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+@media(max-width:850px){
+  .topbar{isolation:isolate}
+  .main{overflow-wrap:anywhere}
+  .page-head{position:relative;z-index:0}
+  .sidebar{overscroll-behavior-y:contain}
+}
+@media(max-width:600px){
+  .form-grid{grid-template-columns:minmax(0,1fr)}
+  #connectionForm .actions{display:grid;grid-template-columns:minmax(0,1fr);width:100%}
+  #connectionForm .actions .btn{width:100%;min-height:48px;white-space:normal;line-height:1.35}
+  #connectionForm .field input{min-height:48px;font-size:14px}
+  #connectionStatus{padding:13px;font-size:13px;line-height:1.6}
+  #cloudflareConnectionCard details{padding-top:2px}
+  #cloudflareConnectionCard details ol{padding-left:20px}
+  .profile-details{grid-template-columns:minmax(0,1fr)}
+  .profile-card-head{display:grid;grid-template-columns:50px minmax(0,1fr);align-items:center}
+  .profile-card-head .profile-role{grid-column:2;justify-self:start;margin-top:2px}
+  .profile-card-head>div:nth-child(2){min-width:0}
+  .profile-card-head .muted{overflow-wrap:anywhere}
+  .profile-session .btn{min-height:46px}
+  .site-footer{padding-bottom:max(24px,env(safe-area-inset-bottom))}
+}
+@media(max-width:380px){
+  .main{padding-inline:12px}
+  .card{padding:14px}
+  #connectionForm .actions .btn{font-size:14px;padding:12px}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
 </style>
 </head>
 <body>
