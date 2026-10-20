@@ -1,6 +1,13 @@
 const ALLOWED_ORIGIN = "https://xtracombo.github.io";
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === "https:" && parsed.hostname === "xtracombo.github.io" && !parsed.port;
+  } catch { return false; }
+}
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
-const PBKDF2_ITERATIONS = 210000;
+const PBKDF2_ITERATIONS = 100000;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -135,13 +142,14 @@ function errorsText(payload) {
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
-    const allowed = origin === ALLOWED_ORIGIN;
+    const allowed = isAllowedOrigin(origin);
     if (request.method === "OPTIONS") {
-      if (!allowed) return new Response(null, { status: 403 });
+      if (!allowed) return new Response(null, { status: 403, headers: { "vary": "Origin" } });
+      const requestedHeaders = request.headers.get("Access-Control-Request-Headers") || "content-type, x-session-token";
       return new Response(null, { status: 204, headers: {
         "access-control-allow-origin": ALLOWED_ORIGIN,
         "access-control-allow-methods": "POST, OPTIONS",
-        "access-control-allow-headers": "content-type, x-session-token",
+        "access-control-allow-headers": requestedHeaders,
         "access-control-max-age": "86400", "vary": "Origin"
       }});
     }
@@ -149,7 +157,7 @@ export default {
     const route = new URL(request.url).pathname;
     const knownRoutes = [
       "/api/register", "/api/login", "/api/logout", "/api/me", "/api/connect-cloudflare", "/api/disconnect-cloudflare",
-      "/api/admin/users", "/api/admin/audit",
+      "/api/admin/users", "/api/admin/audit", "/api/admin/user-status",
       "/api/add-domain", "/api/check-domain", "/api/delete-domain", "/api/dns-list", "/api/dns-create", "/api/dns-update", "/api/dns-delete",
       "/api/workers-list", "/api/worker-domains-list", "/api/worker-domain-create", "/api/worker-domain-delete",
       "/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-delete", "/api/worker-routes-list", "/api/worker-route-create", "/api/worker-route-delete", "/api/pages-list", "/api/zones-list"
@@ -252,11 +260,28 @@ export default {
       await audit(env, userId, "cloudflare.disconnect", "cloudflare_account", accountId || null);
       return json({ success: true, message: "Koneksi Cloudflare dihapus dari Club Gratis." });
     }
-    if (route === "/api/admin/users" || route === "/api/admin/audit") {
+    if (["/api/admin/users", "/api/admin/audit", "/api/admin/user-status"].includes(route)) {
       if (session.role !== "admin") return json({ success: false, message: "Akses khusus Admin." }, 403);
       if (route === "/api/admin/users") {
         const rows = await env.DB.prepare("SELECT u.id, u.username, u.email, u.role, u.status, u.created_at, u.last_login_at, c.account_id AS cloudflare_account_id, c.status AS connection_status FROM users u LEFT JOIN cloudflare_connections c ON c.user_id = u.id ORDER BY u.created_at DESC LIMIT 200").all();
         return json({ success: true, result: rows.results || [] });
+      }
+      if (route === "/api/admin/user-status") {
+        const targetId = typeof body.userId === "string" ? body.userId.trim() : "";
+        // Frontend uses "inactive"; the existing D1 schema stores that state as "disabled".
+        const requestedStatus = typeof body.status === "string" ? body.status.trim().toLowerCase() : "";
+        if (!targetId || !["active", "inactive", "disabled"].includes(requestedStatus)) return json({ success: false, message: "Permintaan status pengguna tidak valid." }, 400);
+        const dbStatus = requestedStatus === "inactive" ? "disabled" : requestedStatus;
+        const isDisabling = dbStatus === "disabled";
+        if (targetId === userId) return json({ success: false, message: "Admin tidak dapat menonaktifkan akunnya sendiri." }, 400);
+        const target = await env.DB.prepare("SELECT id, username, role, status FROM users WHERE id = ? LIMIT 1").bind(targetId).first();
+        if (!target) return json({ success: false, message: "Pengguna tidak ditemukan." }, 404);
+        if (target.role === "admin") return json({ success: false, message: "Perubahan status akun Admin lain diblokir untuk mencegah kehilangan akses." }, 403);
+        if (target.status === dbStatus) return json({ success: true, message: `Akun ${target.username} sudah ${isDisabling ? "nonaktif" : "aktif"}.` });
+        await env.DB.prepare("UPDATE users SET status = ? WHERE id = ?").bind(dbStatus, targetId).run();
+        if (isDisabling) await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(targetId).run();
+        await audit(env, userId, isDisabling ? "admin.user.deactivate" : "admin.user.activate", "user", targetId, "success", { username: target.username, status: dbStatus });
+        return json({ success: true, message: `Akun ${target.username} berhasil ${isDisabling ? "dinonaktifkan" : "diaktifkan kembali"}.` });
       }
       const rows = await env.DB.prepare("SELECT a.id, a.actor_user_id, u.username AS actor_username, a.action, a.target_type, a.target_id, a.result, a.details_json, a.created_at FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id ORDER BY a.created_at DESC LIMIT 200").all();
       return json({ success: true, result: rows.results || [] });
