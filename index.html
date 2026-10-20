@@ -91,6 +91,62 @@ html[data-theme="light"] body{background:radial-gradient(900px 500px at 80% -10%
 
 
 .profile-shortcut{cursor:pointer;font:inherit;display:inline-flex;align-items:center;gap:4px}.profile-shortcut:hover{border-color:var(--blue)}.nav-logout{color:var(--bad)}.profile-card{margin-bottom:17px}.profile-card-head{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.profile-avatar{width:64px;height:64px;border-radius:20px;display:grid;place-items:center;font-size:27px;font-weight:850;color:#fff;background:linear-gradient(135deg,var(--blue),var(--purple));box-shadow:0 10px 26px #5c8dff30}.profile-card-head h2{margin:0 0 4px;font-size:22px}.profile-card-head .muted{margin:0}.profile-role{margin-left:auto;padding:7px 10px;border-radius:99px;background:var(--surface-raised);border:1px solid var(--line);font-size:11px;font-weight:800;color:var(--blue)}.profile-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:22px}.profile-details>div{padding:14px;border:1px solid var(--line);background:var(--surface-raised);border-radius:12px;min-width:0}.profile-details small{display:block;color:var(--muted);font-size:11px;margin-bottom:6px}.profile-details strong{display:block;overflow-wrap:anywhere;font-size:13px}.profile-preferences,.profile-session{margin-top:17px}@media(max-width:520px){.profile-details{grid-template-columns:1fr}.profile-role{margin-left:0}.profile-card-head{align-items:flex-start}.profile-shortcut{padding:7px 9px;font-size:12px}.top-actions{gap:6px}}
+
+/* Mobile polish v3: compact header, correctly aligned drawer, and tighter profile layout */
+@media(max-width:850px){
+  .topbar{height:72px;min-height:72px;max-height:72px;box-sizing:border-box;padding:0 12px;gap:8px;overflow:hidden}
+  .topbrand{flex:1 1 auto;min-width:0;gap:8px;overflow:hidden}
+  .topbrand .brand-mark{width:36px;height:36px;min-width:36px;border-radius:11px}
+  .topbrand>div:last-child{min-width:0;overflow:hidden}
+  .topbrand strong{display:block;font-size:12px;line-height:1.2;letter-spacing:.7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbrand small{display:none}
+  .top-actions{flex:0 0 auto;gap:7px;min-width:0}
+  .profile-shortcut{width:42px;height:42px;min-width:42px;padding:0;justify-content:center;gap:0;font-size:0;border-radius:13px;overflow:hidden}
+  .profile-shortcut::before{content:'♙';font-size:19px;line-height:1}
+  .profile-shortcut span{display:none}
+  .theme-toggle{width:42px;height:42px;min-width:42px;padding:0;justify-content:center;border-radius:13px}
+  .theme-toggle span{display:none}
+  .mobile-menu{width:42px;min-width:42px;height:42px;min-height:42px;padding:0;border-radius:13px}
+  .sidebar{top:72px;bottom:0;max-height:calc(100dvh - 72px);padding-bottom:max(20px,env(safe-area-inset-bottom))}
+  .sidebar-overlay{top:72px}
+  .layout{min-height:calc(100vh - 72px)}
+  .main{padding-top:22px}
+  .page-head{scroll-margin-top:84px}
+}
+@media(max-width:600px){
+  .topbar{padding-inline:10px;gap:7px}
+  .topbrand{gap:7px}
+  .topbrand .brand-mark{width:34px;height:34px;min-width:34px}
+  .topbrand strong{font-size:11px;letter-spacing:.45px}
+  .mobile-menu,.profile-shortcut,.theme-toggle{width:40px;min-width:40px;height:40px;min-height:40px}
+  .main{padding:20px 14px 28px}
+  .page-head{margin-bottom:18px}
+  .page-head h1{font-size:clamp(24px,7vw,30px);line-height:1.15;overflow-wrap:anywhere}
+  .page-head p{font-size:14px;line-height:1.55}
+  .card{padding:16px;border-radius:16px}
+  .dashboard-hero{padding:20px 17px}
+  .dashboard-hero h2{font-size:clamp(24px,6.8vw,28px);line-height:1.15}
+  .profile-card-head{gap:12px}
+  .profile-avatar{width:50px;height:50px;border-radius:15px;font-size:22px}
+  .profile-card-head h2{font-size:20px}
+  .profile-details{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:16px}
+  .profile-details>div{padding:11px;border-radius:11px}
+  .profile-details strong{font-size:12px;overflow-wrap:anywhere;word-break:break-word}
+  .profile-role{margin-left:0}
+  .profile-preferences,.profile-session{margin-top:12px}
+  .actions{gap:8px}
+  .actions .btn{max-width:100%;white-space:normal}
+}
+@media(max-width:380px){
+  .topbar{padding-inline:8px;gap:5px}
+  .topbrand{gap:5px}
+  .topbrand .brand-mark{width:31px;height:31px;min-width:31px}
+  .topbrand strong{font-size:10px;letter-spacing:.2px}
+  .mobile-menu,.profile-shortcut,.theme-toggle{width:37px;min-width:37px;height:38px;min-height:38px}
+  .profile-details{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){.profile-shortcut::before{transition:none}}
+
 </style>
 </head>
 <body>
