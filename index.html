@@ -89,7 +89,12 @@ async function api(path, body) {
   const headers = {'Content-Type':'application/json'};
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (token) headers['X-Session-Token'] = token;
-  const response = await fetch(API + path, {method:'POST', headers, body:JSON.stringify(body)});
+  let response;
+  try {
+    response = await fetch(API + path, {method:'POST', headers, body:JSON.stringify(body)});
+  } catch (networkError) {
+    throw new Error(`Tidak dapat menghubungi backend (${new URL(API).host}). Periksa URL Worker aktif dan izin CORS. Detail: ${networkError?.message || 'network error'}`);
+  }
   const data = await response.json().catch(() => ({}));
   if (response.status === 401 && !['/api/login','/api/register'].includes(path)) { sessionStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(USER_KEY);sessionStorage.removeItem('cg_user_role');appView.classList.add('hidden');loginView.classList.remove('hidden');setAuthMode('login');throw new Error(data.message || 'Sesi berakhir. Silakan login kembali.'); }
   if (!response.ok || data.success === false) throw new Error(data.message || data.errors?.map(e=>e.message).join('; ') || `Permintaan gagal (${response.status}).`);
