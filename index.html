@@ -127,7 +127,8 @@ let currentPage = 'dashboard';
 function notice(el, message, kind='error') { el.className = `notice ${kind}`; el.textContent = message; }
 function hideNotice(el) { el.className = 'notice hidden'; el.textContent = ''; }
 async function api(path, body) {
-  const headers = {'Content-Type':'application/json'};
+  // Kirim JSON sebagai text/plain agar login/register tidak memicu CORS preflight. Worker tetap membaca body dengan request.json().
+  const headers = {'Content-Type':'text/plain;charset=UTF-8'};
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (token) headers['X-Session-Token'] = token;
   let response;
