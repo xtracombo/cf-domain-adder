@@ -357,18 +357,26 @@ async function renderProfilePage(){
  const newPasswordInput=$('newPassword'),confirmPasswordInput=$('confirmNewPassword');
  const strengthBox=$('passwordStrength'),strengthLabel=$('passwordStrengthLabel'),strengthHint=$('passwordStrengthHint'),matchMessage=$('passwordMatchMessage');
  const updatePasswordIndicators=()=>{
-  const value=newPasswordInput.value;let score=0;
+  const value=newPasswordInput.value;
+  const confirmation=confirmPasswordInput.value;
+  let score=0;
   if(value.length>=12)score++;
   if(value.length>=16)score++;
   if(/[a-z]/.test(value)&&/[A-Z]/.test(value))score++;
   if(/[0-9]/.test(value)&&/[^A-Za-z0-9]/.test(value))score++;
   if(value.length===0){strengthBox.dataset.level='0';strengthLabel.textContent='Belum diisi';strengthHint.textContent='Gunakan minimal 12 karakter dan gabungkan beberapa jenis karakter.';}
   else {const level=Math.min(4,score);strengthBox.dataset.level=String(level);const labels=['Lemah','Sedang','Baik','Kuat','Sangat kuat'];strengthLabel.textContent=labels[level];strengthHint.textContent=value.length<12?'Tambah karakter hingga minimal 12 karakter.':level<3?'Coba tambah panjang password serta campuran huruf besar, angka, atau simbol.':level===3?'Sudah cukup baik; tambah panjang atau variasi untuk memperkuatnya.':'Bagus! Tetap gunakan password unik yang tidak dipakai di situs lain.';}
-  if(!confirmPasswordInput.value){matchMessage.textContent='Konfirmasi akan diperiksa saat kamu mengetik.';matchMessage.dataset.match='';}
-  else if(value===confirmPasswordInput.value){matchMessage.textContent='✓ Password baru cocok.';matchMessage.dataset.match='yes';}
+  if(!confirmation){matchMessage.textContent='Konfirmasi akan diperiksa saat kamu mengetik.';matchMessage.dataset.match='';}
+  else if(value===confirmation){matchMessage.textContent='✓ Password baru cocok.';matchMessage.dataset.match='yes';}
   else {matchMessage.textContent='✕ Password belum cocok.';matchMessage.dataset.match='no';}
+  const ready=$('currentPassword').value.length>0 && value.length>=12 && confirmation.length>0 && value===confirmation && value!==$('currentPassword').value;
+  $('savePasswordBtn').disabled=!ready;
+  $('savePasswordBtn').setAttribute('aria-disabled',String(!ready));
  };
- newPasswordInput.addEventListener('input',updatePasswordIndicators);confirmPasswordInput.addEventListener('input',updatePasswordIndicators);
+ $('currentPassword').addEventListener('input',updatePasswordIndicators);
+ newPasswordInput.addEventListener('input',updatePasswordIndicators);
+ confirmPasswordInput.addEventListener('input',updatePasswordIndicators);
+ updatePasswordIndicators();
  passwordForm.onsubmit=async e=>{e.preventDefault();if($('newPassword').value!==$('confirmNewPassword').value){passwordMsg.textContent='Konfirmasi password baru tidak cocok.';passwordMsg.style.borderColor='#79324a';passwordMsg.className='result';return;}if($('currentPassword').value===$('newPassword').value){passwordMsg.textContent='Password baru harus berbeda dari password lama.';passwordMsg.style.borderColor='#79324a';passwordMsg.className='result';return;}const btn=$('savePasswordBtn');btn.disabled=true;passwordMsg.className='result';passwordMsg.textContent='Memperbarui password dengan aman...';try{const out=await api('/api/account-update',{currentPassword:$('currentPassword').value,newPassword:$('newPassword').value});passwordMsg.textContent=out.message;passwordMsg.style.borderColor='#246d58';passwordForm.reset();setTimeout(()=>logout(true),900);}catch(err){passwordMsg.textContent=err.message;passwordMsg.style.borderColor='#79324a';passwordMsg.className='result';btn.disabled=false;}};
  const conn=window.cgConnection||{connected:false};const status=$('connectionStatus');
  if(conn.connected){$('connectionSummaryText').textContent='Terhubung · tekan untuk melihat detail';status.textContent=`Terhubung ke Cloudflare Account ID: ${conn.accountId||'-'} · Status: ${conn.status||'active'}.`;status.style.borderColor='#246d58';$('cfAccountId').value=conn.accountId||'';$('cfApiToken').required=true;$('cfApiToken').placeholder='Masukkan token untuk memverifikasi atau memperbarui koneksi';}
