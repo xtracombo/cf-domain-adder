@@ -1,11 +1,4 @@
 const ALLOWED_ORIGIN = "https://xtracombo.github.io";
-function isAllowedOrigin(origin) {
-  if (!origin) return false;
-  try {
-    const parsed = new URL(origin);
-    return parsed.protocol === "https:" && parsed.hostname === "xtracombo.github.io" && !parsed.port;
-  } catch { return false; }
-}
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
 const PBKDF2_ITERATIONS = 100000;
 
@@ -142,14 +135,13 @@ function errorsText(payload) {
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin") || "";
-    const allowed = isAllowedOrigin(origin);
+    const allowed = origin === ALLOWED_ORIGIN;
     if (request.method === "OPTIONS") {
-      if (!allowed) return new Response(null, { status: 403, headers: { "vary": "Origin" } });
-      const requestedHeaders = request.headers.get("Access-Control-Request-Headers") || "content-type, x-session-token";
+      if (!allowed) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: {
         "access-control-allow-origin": ALLOWED_ORIGIN,
         "access-control-allow-methods": "POST, OPTIONS",
-        "access-control-allow-headers": requestedHeaders,
+        "access-control-allow-headers": "content-type, x-session-token",
         "access-control-max-age": "86400", "vary": "Origin"
       }});
     }
@@ -157,7 +149,7 @@ export default {
     const route = new URL(request.url).pathname;
     const knownRoutes = [
       "/api/register", "/api/login", "/api/logout", "/api/me", "/api/connect-cloudflare", "/api/disconnect-cloudflare",
-      "/api/admin/users", "/api/admin/audit", "/api/admin/user-status",
+      "/api/admin/users", "/api/admin/audit", "/api/admin/user-status", "/api/account-update",
       "/api/add-domain", "/api/check-domain", "/api/delete-domain", "/api/dns-list", "/api/dns-create", "/api/dns-update", "/api/dns-delete",
       "/api/workers-list", "/api/worker-domains-list", "/api/worker-domain-create", "/api/worker-domain-delete",
       "/api/pages-domains-list", "/api/pages-domain-create", "/api/pages-domain-delete", "/api/worker-routes-list", "/api/worker-route-create", "/api/worker-route-delete", "/api/pages-list", "/api/zones-list"
@@ -226,6 +218,42 @@ export default {
       const connection = await env.DB.prepare("SELECT id, account_id, status, created_at, updated_at FROM cloudflare_connections WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").bind(userId).first();
       return json({ success: true, user: { id: userId, username: session.username, email: session.email, role: session.role }, connection: connection ? { connected: true, accountId: connection.account_id, status: connection.status } : { connected: false } });
     }
+    if (route === "/api/account-update") {
+      const requestedUsername = typeof body.username === "string" ? body.username.trim() : "";
+      const hasUsername = Object.prototype.hasOwnProperty.call(body, "username");
+      const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
+      const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+      const changingPassword = currentPassword.length > 0 || newPassword.length > 0;
+      if (!hasUsername && !changingPassword) return json({ success: false, message: "Tidak ada perubahan yang diminta." }, 400);
+      if (hasUsername && !validUsername(requestedUsername)) return json({ success: false, message: "Username harus 3–32 karakter: huruf, angka, titik, garis bawah, atau tanda hubung." }, 400);
+      if (hasUsername && requestedUsername.toLowerCase() !== session.username.toLowerCase()) {
+        const duplicate = await env.DB.prepare("SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id != ? LIMIT 1").bind(requestedUsername, userId).first();
+        if (duplicate) return json({ success: false, message: "Username sudah digunakan akun lain." }, 409);
+      }
+      let newHash = null;
+      if (changingPassword) {
+        if (!currentPassword || !newPassword) return json({ success: false, message: "Isi password lama dan password baru." }, 400);
+        if (newPassword.length < 12 || newPassword.length > 256) return json({ success: false, message: "Password baru harus 12–256 karakter." }, 400);
+        const account = await env.DB.prepare("SELECT password_hash FROM users WHERE id = ? LIMIT 1").bind(userId).first();
+        if (!account || !(await verifyPassword(currentPassword, account.password_hash))) {
+          await audit(env, userId, "account.password_change", "user", userId, "failure", { reason: "invalid_current_password" });
+          return json({ success: false, message: "Password lama tidak benar." }, 400);
+        }
+        newHash = await hashPassword(newPassword);
+      }
+      if (hasUsername && requestedUsername.toLowerCase() !== session.username.toLowerCase()) {
+        try { await env.DB.prepare("UPDATE users SET username = ? WHERE id = ?").bind(requestedUsername, userId).run(); }
+        catch { return json({ success: false, message: "Username tidak dapat digunakan. Coba username lain." }, 409); }
+        await audit(env, userId, "account.username_change", "user", userId, "success", { oldUsername: session.username, newUsername: requestedUsername });
+      }
+      if (newHash) {
+        await env.DB.prepare("UPDATE users SET password_hash = ? WHERE id = ?").bind(newHash, userId).run();
+        await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId).run();
+        await audit(env, userId, "account.password_change", "user", userId);
+        return json({ success: true, passwordChanged: true, username: hasUsername ? requestedUsername : session.username, message: hasUsername && requestedUsername.toLowerCase() !== session.username.toLowerCase() ? "Username dan password berhasil diperbarui. Silakan login kembali." : "Password berhasil diperbarui. Silakan login kembali." });
+      }
+      return json({ success: true, username: hasUsername ? requestedUsername : session.username, message: hasUsername && requestedUsername.toLowerCase() !== session.username.toLowerCase() ? "Username berhasil diperbarui." : "Tidak ada perubahan username." });
+    }
     if (route === "/api/connect-cloudflare") {
       const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
       const apiToken = typeof body.apiToken === "string" ? body.apiToken.trim() : "";
@@ -268,20 +296,17 @@ export default {
       }
       if (route === "/api/admin/user-status") {
         const targetId = typeof body.userId === "string" ? body.userId.trim() : "";
-        // Frontend uses "inactive"; the existing D1 schema stores that state as "disabled".
-        const requestedStatus = typeof body.status === "string" ? body.status.trim().toLowerCase() : "";
-        if (!targetId || !["active", "inactive", "disabled"].includes(requestedStatus)) return json({ success: false, message: "Permintaan status pengguna tidak valid." }, 400);
-        const dbStatus = requestedStatus === "inactive" ? "disabled" : requestedStatus;
-        const isDisabling = dbStatus === "disabled";
+        const status = typeof body.status === "string" ? body.status.trim().toLowerCase() : "";
+        if (!targetId || !["active", "inactive"].includes(status)) return json({ success: false, message: "Permintaan status pengguna tidak valid." }, 400);
         if (targetId === userId) return json({ success: false, message: "Admin tidak dapat menonaktifkan akunnya sendiri." }, 400);
         const target = await env.DB.prepare("SELECT id, username, role, status FROM users WHERE id = ? LIMIT 1").bind(targetId).first();
         if (!target) return json({ success: false, message: "Pengguna tidak ditemukan." }, 404);
         if (target.role === "admin") return json({ success: false, message: "Perubahan status akun Admin lain diblokir untuk mencegah kehilangan akses." }, 403);
-        if (target.status === dbStatus) return json({ success: true, message: `Akun ${target.username} sudah ${isDisabling ? "nonaktif" : "aktif"}.` });
-        await env.DB.prepare("UPDATE users SET status = ? WHERE id = ?").bind(dbStatus, targetId).run();
-        if (isDisabling) await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(targetId).run();
-        await audit(env, userId, isDisabling ? "admin.user.deactivate" : "admin.user.activate", "user", targetId, "success", { username: target.username, status: dbStatus });
-        return json({ success: true, message: `Akun ${target.username} berhasil ${isDisabling ? "dinonaktifkan" : "diaktifkan kembali"}.` });
+        if (target.status === status) return json({ success: true, message: `Akun ${target.username} sudah berstatus ${status}.` });
+        await env.DB.prepare("UPDATE users SET status = ? WHERE id = ?").bind(status, targetId).run();
+        if (status === "inactive") await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(targetId).run();
+        await audit(env, userId, status === "inactive" ? "admin.user.deactivate" : "admin.user.activate", "user", targetId, "success", { username: target.username, status });
+        return json({ success: true, message: `Akun ${target.username} berhasil ${status === "inactive" ? "dinonaktifkan" : "diaktifkan kembali"}.` });
       }
       const rows = await env.DB.prepare("SELECT a.id, a.actor_user_id, u.username AS actor_username, a.action, a.target_type, a.target_id, a.result, a.details_json, a.created_at FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id ORDER BY a.created_at DESC LIMIT 200").all();
       return json({ success: true, result: rows.results || [] });
