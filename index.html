@@ -226,6 +226,61 @@ button:focus-visible,.nav:focus-visible{outline:2px solid var(--blue);outline-of
 .profile-username-line{display:flex;align-items:center;justify-content:space-between;gap:10px}.profile-edit-username{padding:7px 10px;font-size:12px;white-space:nowrap}.username-editor{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}.password-disclosure>summary{display:flex;align-items:center;gap:13px;cursor:pointer;list-style:none}.password-disclosure>summary::-webkit-details-marker{display:none}.password-disclosure-icon{width:48px;height:48px;flex:0 0 48px;display:grid;place-items:center;border:1px solid var(--line);border-radius:15px;background:var(--surface-raised);font-size:23px}.password-disclosure-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}.password-disclosure-copy .eyebrow{margin:0}.password-disclosure-copy strong{font-size:19px}.password-disclosure-copy small{font-size:12px;color:var(--muted);line-height:1.45}.password-disclosure-chevron{width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:11px;color:var(--muted);transition:transform .18s ease}.password-disclosure[open] .password-disclosure-chevron{transform:rotate(180deg)}.password-disclosure-body{padding-top:20px}.account-security-card{padding:18px}.account-security-card .security-note{margin:14px 0}
 
 .account-security-card .eyebrow{margin-bottom:8px}.account-security-card .field{margin:16px 0}.account-security-card .field small{display:block;margin-top:7px;font-size:12px}.password-field{display:flex;align-items:center;gap:8px}.password-field input{flex:1;min-width:0}.password-toggle{flex:0 0 auto;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface-raised);color:var(--text);font:inherit;font-size:12px;font-weight:750;cursor:pointer}.security-divider{height:1px;background:var(--line);margin:24px 0}.security-note{font-size:13px;line-height:1.65}.account-security-card .result{margin-top:12px;overflow-wrap:anywhere}.account-security-card .btn:disabled{opacity:.6;cursor:wait}@media(max-width:520px){.password-field{gap:6px}.password-toggle{padding:10px}.account-security-card .actions .btn{width:100%}}.password-strength{margin:10px 0 2px}.password-strength-top{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:750}.password-strength-track{height:7px;margin-top:8px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}.password-strength-track span{display:block;border-radius:99px;background:var(--line);transition:background .18s ease}.password-strength[data-level="1"] .password-strength-track span:nth-child(-n+1){background:#ef5350}.password-strength[data-level="2"] .password-strength-track span:nth-child(-n+2){background:#f0a33a}.password-strength[data-level="3"] .password-strength-track span:nth-child(-n+3){background:#d6bd3b}.password-strength[data-level="4"] .password-strength-track span:nth-child(-n+4){background:#28b889}.password-hint,.password-match{display:block;margin-top:7px;font-size:12px;line-height:1.5;color:var(--muted)}.password-match[data-match="yes"]{color:#28b889}.password-match[data-match="no"]{color:#ef7777}
+
+/* Admin panel refresh — compact SaaS user cards and audit timeline */
+.admin-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0 0 18px}
+.admin-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0!important}
+.admin-tabs .btn{min-height:43px}
+.admin-panel-intro{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px}
+.admin-panel-intro .section-title{font-size:19px;margin:0 0 6px}
+.admin-panel-intro .muted{margin:0;max-width:680px}
+.admin-count{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;border:1px solid var(--line);background:var(--surface-raised);color:var(--muted);border-radius:99px;padding:8px 11px;font-size:12px;font-weight:800}
+.admin-count strong{font-size:14px;color:var(--text)}
+.admin-users-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.admin-user-card{min-width:0;padding:17px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,var(--surface),color-mix(in srgb,var(--blue) 3%,var(--surface)));box-shadow:0 10px 28px rgba(0,0,0,.08)}
+.admin-user-head{display:flex;align-items:center;gap:12px;min-width:0}
+.admin-user-avatar{display:grid;place-items:center;flex:0 0 44px;width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,var(--blue),var(--purple));color:white;font-weight:900;font-size:17px}
+.admin-user-identity{min-width:0;flex:1}
+.admin-user-identity strong{display:block;overflow-wrap:anywhere;font-size:15px;line-height:1.35}
+.admin-user-identity small{display:block;color:var(--muted);font-size:12px;line-height:1.45;overflow-wrap:anywhere;margin-top:3px}
+.admin-user-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+.admin-badge{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:5px 9px;font-size:10px;line-height:1.3;font-weight:850;letter-spacing:.25px;background:var(--surface-raised);border:1px solid var(--line);color:var(--muted)}
+.admin-badge:before{content:"";width:6px;height:6px;flex:0 0 6px;border-radius:50%;background:currentColor}
+.admin-badge.is-active{color:var(--good);border-color:color-mix(in srgb,var(--good) 28%,var(--line));background:color-mix(in srgb,var(--good) 8%,var(--surface))}
+.admin-badge.is-disabled{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 28%,var(--line));background:color-mix(in srgb,var(--bad) 7%,var(--surface))}
+.admin-badge.is-admin{color:var(--purple);border-color:color-mix(in srgb,var(--purple) 28%,var(--line))}
+.admin-user-meta{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:15px;padding-top:14px;border-top:1px solid var(--line)}
+.admin-meta-item{min-width:0}
+.admin-meta-item small{display:block;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;margin-bottom:4px}
+.admin-meta-item span{display:block;color:var(--text);font-size:12px;line-height:1.55;overflow-wrap:anywhere;word-break:break-word}
+.admin-user-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:15px}
+.admin-user-actions .btn{min-height:40px;padding:9px 12px;font-size:12px}
+.admin-protected{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;padding:9px 0}
+.admin-audit-list{display:grid;gap:10px}
+.admin-audit-item{position:relative;display:grid;grid-template-columns:42px minmax(0,1fr);gap:12px;padding:15px;border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,var(--surface),color-mix(in srgb,var(--blue) 2%,var(--surface)));min-width:0}
+.admin-audit-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:color-mix(in srgb,var(--blue) 12%,var(--surface-raised));border:1px solid color-mix(in srgb,var(--blue) 22%,var(--line));color:var(--blue);font-size:18px}
+.admin-audit-main{min-width:0}
+.admin-audit-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.admin-audit-action{font-size:13px;font-weight:850;line-height:1.45;overflow-wrap:anywhere}
+.admin-audit-time{font-size:11px;color:var(--muted);line-height:1.5}
+.admin-audit-summary{display:flex;flex-wrap:wrap;gap:7px 12px;margin-top:7px;color:var(--muted);font-size:12px;line-height:1.5}
+.admin-audit-result{display:inline-flex;align-items:center;gap:5px;border-radius:99px;padding:4px 8px;font-size:10px;font-weight:850;background:color-mix(in srgb,var(--good) 9%,var(--surface));color:var(--good);border:1px solid color-mix(in srgb,var(--good) 24%,var(--line))}
+.admin-audit-result.is-error{background:color-mix(in srgb,var(--bad) 8%,var(--surface));color:var(--bad);border-color:color-mix(in srgb,var(--bad) 24%,var(--line))}
+.admin-audit-details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.admin-audit-details summary{cursor:pointer;color:var(--blue);font-size:12px;font-weight:800;list-style:none}
+.admin-audit-details summary::-webkit-details-marker{display:none}
+.admin-audit-details summary:after{content:"＋";float:right}
+.admin-audit-details[open] summary:after{content:"−"}
+.admin-audit-detail-body{display:grid;gap:9px;margin-top:12px}
+.admin-audit-detail-body small{display:block;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:4px}
+.admin-audit-detail-body code,.admin-audit-detail-body pre{display:block;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;color:var(--text);font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;background:var(--field-bg);border:1px solid var(--line);border-radius:10px;padding:10px;margin:0}
+.admin-empty{padding:28px 18px;text-align:center;border:1px dashed var(--line);border-radius:15px;color:var(--muted);background:color-mix(in srgb,var(--surface-raised) 55%,transparent)}
+.admin-empty strong{display:block;color:var(--text);margin-bottom:5px}
+.admin-loading{padding:16px;color:var(--muted);font-size:13px}
+.admin-feedback{margin-top:14px}
+@media(max-width:850px){.admin-users-grid{grid-template-columns:1fr}.admin-panel-intro{align-items:flex-start}}
+@media(max-width:600px){.admin-toolbar{align-items:stretch}.admin-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.admin-tabs .btn{width:100%;padding:11px 8px;font-size:12px}.admin-panel-intro{display:grid;gap:12px}.admin-count{justify-self:start}.admin-user-card{padding:15px}.admin-audit-item{grid-template-columns:36px minmax(0,1fr);gap:10px;padding:12px}.admin-audit-icon{width:36px;height:36px;border-radius:11px}.admin-audit-top{display:grid;gap:4px}.admin-user-actions .btn{flex:1 1 auto}.admin-user-meta{gap:9px}}
+
 </style>
 </head>
 <body>
@@ -389,15 +444,98 @@ async function renderProfilePage(){
 }
 
 async function renderAdminPage(){
- mainContent.innerHTML=head('ADMINISTRATION','Admin Panel','Kelola pengguna dan pantau aktivitas Club Gratis.')+`<div class="actions" style="margin:0 0 16px"><button class="btn" id="adminUsersTab" type="button">Pengguna Terdaftar</button><button class="btn secondary" id="adminAuditTab" type="button">Audit Log</button></div><section id="adminUsersSection" class="card"><h2 class="section-title">Pengguna terdaftar</h2><p class="muted">Kelola status akun pengguna. Akun Admin dilindungi dan tidak dapat dinonaktifkan dari panel ini.</p><div id="adminUsers" class="result">Memuat data...</div></section><section id="adminAuditSection" class="card hidden"><h2 class="section-title">Audit log</h2><p class="muted">Riwayat aktivitas penting, termasuk perubahan status akun.</p><div id="adminAudit" class="result">Memuat aktivitas...</div></section><div id="adminActionMessage" class="result" role="status"></div>`;
+ mainContent.innerHTML=head('ADMINISTRATION','Admin Panel','Kelola pengguna dan pantau aktivitas Club Gratis.')+
+ `<div class="admin-toolbar"><div class="admin-tabs"><button class="btn" id="adminUsersTab" type="button">♙ Pengguna Terdaftar</button><button class="btn secondary" id="adminAuditTab" type="button">◷ Audit Log</button></div></div>
+ <section id="adminUsersSection" class="card">
+   <div class="admin-panel-intro"><div><h2 class="section-title">Pengguna terdaftar</h2><p class="muted">Kelola akun publik, periksa status dan akses pengguna. Akun Admin dilindungi dan tidak dapat dinonaktifkan dari panel ini.</p></div><span class="admin-count"><strong id="adminUserCount">—</strong> pengguna</span></div>
+   <div id="adminUsers" class="admin-loading">Memuat data pengguna...</div>
+ </section>
+ <section id="adminAuditSection" class="card hidden">
+   <div class="admin-panel-intro"><div><h2 class="section-title">Audit log</h2><p class="muted">Jejak aktivitas penting untuk membantu memantau perubahan dan hasil tindakan.</p></div><span class="admin-count"><strong id="adminAuditCount">—</strong> aktivitas</span></div>
+   <div id="adminAudit" class="admin-loading">Memuat aktivitas...</div>
+ </section>
+ <div id="adminActionMessage" class="result admin-feedback" role="status" aria-live="polite"></div>`;
  const usersTab=$('adminUsersTab'),auditTab=$('adminAuditTab');
- function selectAdminSection(which){const users=which==='users';$('adminUsersSection').classList.toggle('hidden',!users);$('adminAuditSection').classList.toggle('hidden',users);usersTab.classList.toggle('secondary',!users);auditTab.classList.toggle('secondary',users);}
- usersTab.onclick=()=>selectAdminSection('users');auditTab.onclick=()=>selectAdminSection('audit');
- async function loadUsers(){try{const data=await api('/api/admin/users',{});const rows=data.result||[];$('adminUsers').innerHTML=rows.length?`<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Cloudflare Account</th><th>Login terakhir</th><th>Tindakan</th></tr></thead><tbody>${rows.map(u=>`<tr><td data-label="Username">${esc(u.username)}</td><td data-label="Email">${esc(u.email)}</td><td data-label="Role">${esc(u.role)}</td><td data-label="Status">${esc(u.status==='disabled'?'inactive':u.status)}</td><td data-label="Cloudflare Account">${esc(u.cloudflare_account_id||'Belum terhubung')}</td><td data-label="Login terakhir">${esc(u.last_login_at||'-')}</td><td data-label="Tindakan">${u.role==='admin'?'<span class="muted">Admin dilindungi</span>':`<button class="btn ${u.status==='active'?'danger':'secondary'}" data-user-status="${esc(u.id)}" data-next-status="${u.status==='active'?'inactive':'active'}" type="button">${u.status==='active'?'Nonaktifkan':'Aktifkan'}</button><div class="user-action-message" data-user-message="${esc(u.id)}" role="status" aria-live="polite" style="margin-top:8px;font-size:.9rem;overflow-wrap:anywhere"></div>`}</td></tr>`).join('')}</tbody></table></div>`:'Belum ada pengguna.';document.querySelectorAll('[data-user-status]').forEach(btn=>btn.onclick=async()=>{const status=btn.dataset.nextStatus;const label=status==='inactive'?'menonaktifkan':'mengaktifkan kembali';if(!confirm(`Yakin ingin ${label} akun ini?${status==='inactive'?' Sesi login pengguna akan dicabut.':''}`))return;btn.disabled=true;try{const result=await api('/api/admin/user-status',{userId:btn.dataset.userStatus,status});await loadUsers();const localMessage=document.querySelector(`[data-user-message="${CSS.escape(btn.dataset.userStatus)}"]`);if(localMessage){localMessage.textContent=result.message||'Status akun diperbarui.';localMessage.style.color='#55d6a6';}}catch(err){const localMessage=document.querySelector(`[data-user-message="${CSS.escape(btn.dataset.userStatus)}"]`);if(localMessage){localMessage.textContent='Gagal mengubah status: '+err.message;localMessage.style.color='#ff7d9c';}btn.disabled=false;}});}catch(e){$('adminUsers').textContent='Gagal memuat pengguna: '+e.message;}}
- async function loadAudit(){try{const data=await api('/api/admin/audit',{});const rows=data.result||[];$('adminAudit').innerHTML=rows.length?`<div class="data-table-wrap"><table class="data-table"><thead><tr><th>Waktu</th><th>Pengguna</th><th>Aktivitas</th><th>Target</th><th>Hasil</th><th>Detail</th></tr></thead><tbody>${rows.map(a=>`<tr><td data-label="Waktu">${esc(a.created_at)}</td><td data-label="Pengguna">${esc(a.actor_username||a.actor_user_id||'Sistem')}</td><td data-label="Aktivitas">${esc(a.action)}</td><td data-label="Target">${esc((a.target_type||'')+' '+(a.target_id||''))}</td><td data-label="Hasil">${esc(a.result)}</td><td data-label="Detail">${esc(a.details_json||'-')}</td></tr>`).join('')}</tbody></table></div>`:'Belum ada aktivitas.';}catch(e){$('adminAudit').textContent='Gagal memuat audit log: '+e.message;}}
- await loadUsers();await loadAudit();
-}
+ function selectAdminSection(which){
+   const users=which==='users';
+   $('adminUsersSection').classList.toggle('hidden',!users);
+   $('adminAuditSection').classList.toggle('hidden',users);
+   usersTab.classList.toggle('secondary',!users);
+   auditTab.classList.toggle('secondary',users);
+ }
+ usersTab.onclick=()=>selectAdminSection('users');
+ auditTab.onclick=()=>selectAdminSection('audit');
 
+ async function loadUsers(){
+  const box=$('adminUsers');
+  box.innerHTML='<div class="admin-loading">Memuat data pengguna...</div>';
+  try{
+   const data=await api('/api/admin/users',{});
+   const rows=data.result||[];
+   $('adminUserCount').textContent=String(rows.length);
+   if(!rows.length){box.innerHTML='<div class="admin-empty"><strong>Belum ada pengguna</strong>Pengguna yang mendaftar akan muncul di sini.</div>';return;}
+   box.innerHTML=`<div class="admin-users-grid">${rows.map(u=>{
+    const isAdmin=String(u.role||'').toLowerCase()==='admin';
+    const isActive=String(u.status||'active').toLowerCase()==='active';
+    const statusLabel=isActive?'Aktif':'Nonaktif';
+    const email=u.email||'Email tidak tersedia';
+    const cloudflare=u.cloudflare_account_id||'Belum terhubung';
+    const lastLogin=u.last_login_at||'Belum pernah login';
+    return `<article class="admin-user-card">
+      <div class="admin-user-head"><div class="admin-user-avatar" aria-hidden="true">${esc((u.username||'U').trim().charAt(0).toUpperCase())}</div><div class="admin-user-identity"><strong>${esc(u.username||'Tanpa username')}</strong><small>${esc(email)}</small></div></div>
+      <div class="admin-user-badges"><span class="admin-badge ${isAdmin?'is-admin':''}">${esc(String(u.role||'user').toUpperCase())}</span><span class="admin-badge ${isActive?'is-active':'is-disabled'}">${statusLabel}</span></div>
+      <div class="admin-user-meta">
+        <div class="admin-meta-item"><small>Cloudflare Account</small><span>${esc(cloudflare)}</span></div>
+        <div class="admin-meta-item"><small>Login terakhir</small><span>${esc(lastLogin)}</span></div>
+      </div>
+      <div class="admin-user-actions">${isAdmin?'<span class="admin-protected">🔒 Admin dilindungi</span>':`<button class="btn ${isActive?'danger':'secondary'}" data-user-status="${esc(u.id)}" data-next-status="${isActive?'inactive':'active'}" type="button">${isActive?'Nonaktifkan akun':'Aktifkan akun'}</button>`}</div>
+    </article>`;
+   }).join('')}</div>`;
+   box.querySelectorAll('[data-user-status]').forEach(btn=>btn.onclick=async()=>{
+    const nextStatus=btn.dataset.nextStatus;
+    const disabling=nextStatus==='inactive';
+    if(!confirm(`Yakin ingin ${disabling?'menonaktifkan':'mengaktifkan kembali'} akun ini?${disabling?' Sesi login pengguna akan dicabut.':''}`))return;
+    const original=btn.textContent;btn.disabled=true;btn.textContent=disabling?'Menonaktifkan...':'Mengaktifkan...';
+    try{
+     const result=await api('/api/admin/user-status',{userId:btn.dataset.userStatus,status:nextStatus});
+     $('adminActionMessage').className='result admin-feedback';$('adminActionMessage').textContent=result.message||'Status akun diperbarui.';$('adminActionMessage').style.borderColor='var(--good)';
+     await loadUsers();
+    }catch(err){
+     $('adminActionMessage').className='result admin-feedback';$('adminActionMessage').textContent='Gagal mengubah status: '+err.message;$('adminActionMessage').style.borderColor='var(--bad)';
+     btn.disabled=false;btn.textContent=original;
+    }
+   });
+  }catch(e){$('adminUserCount').textContent='—';box.innerHTML=`<div class="admin-empty"><strong>Gagal memuat pengguna</strong>${esc(e.message)}</div>`;}
+ }
+ async function loadAudit(){
+  const box=$('adminAudit');
+  box.innerHTML='<div class="admin-loading">Memuat aktivitas...</div>';
+  try{
+   const data=await api('/api/admin/audit',{});
+   const rows=data.result||[];
+   $('adminAuditCount').textContent=String(rows.length);
+   if(!rows.length){box.innerHTML='<div class="admin-empty"><strong>Belum ada aktivitas</strong>Aktivitas penting akan tercatat di sini.</div>';return;}
+   box.innerHTML=`<div class="admin-audit-list">${rows.map((a,i)=>{
+    const resultText=String(a.result||'Tidak diketahui');
+    const failed=/fail|error|denied|invalid/i.test(resultText);
+    const target=[a.target_type,a.target_id].filter(Boolean).join(' · ');
+    const detailsRaw=String(a.details_json||'');
+    let detailsPretty=detailsRaw||'Tidak ada detail tambahan.';
+    if(detailsRaw){try{detailsPretty=JSON.stringify(JSON.parse(detailsRaw),null,2);}catch{}}
+    const actor=a.actor_username||a.actor_user_id||'Sistem';
+    const action=String(a.action||'Aktivitas');
+    const icon=/login/i.test(action)?'↗':/status|disable|enable|account/i.test(action)?'♙':/delete|remove/i.test(action)?'⌫':'◷';
+    return `<article class="admin-audit-item"><div class="admin-audit-icon" aria-hidden="true">${icon}</div><div class="admin-audit-main">
+      <div class="admin-audit-top"><div class="admin-audit-action">${esc(action)}</div><time class="admin-audit-time">${esc(a.created_at||'Waktu tidak tersedia')}</time></div>
+      <div class="admin-audit-summary"><span>👤 ${esc(actor)}</span>${target?`<span>Target: ${esc(target.length>70?target.slice(0,67)+'…':target)}</span>`:''}<span class="admin-audit-result ${failed?'is-error':''}">${esc(resultText)}</span></div>
+      <details class="admin-audit-details"><summary>Lihat detail aktivitas</summary><div class="admin-audit-detail-body">${target?`<div><small>Target lengkap</small><code>${esc(target)}</code></div>`:''}<div><small>Detail tambahan</small><pre>${esc(detailsPretty)}</pre></div></div></details>
+    </div></article>`;
+   }).join('')}</div>`;
+  }catch(e){$('adminAuditCount').textContent='—';box.innerHTML=`<div class="admin-empty"><strong>Gagal memuat Audit Log</strong>${esc(e.message)}</div>`;}
+ }
+ await loadUsers();
+ await loadAudit();
+}
 async function renderSubdomainPage(){
  mainContent.innerHTML=head('DNS MANAGEMENT','Buat Subdomain','Buat hostname baru pada zona Cloudflare yang sudah ada, misalnya youtube.com.kings.biz.id.')+`<div class="card"><h2 class="section-title">Tambah Subdomain</h2><p class="muted">Pilih zona induk, masukkan nama host, lalu tentukan tipe record dan target. Ini membuat DNS record; untuk menghubungkan ke Worker, konfigurasi Worker/Routes tetap diperlukan.</p><form id="subForm"><div class="form-grid"><div class="field"><label for="subZone">Domain induk / zona</label><input id="subZone" required placeholder="kings.biz.id" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="subHost">Nama subdomain</label><input id="subHost" required placeholder="youtube.com" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="subType">Tipe DNS</label><select id="subType" required style="width:100%;background:#090f1f;border:1px solid var(--line);border-radius:12px;padding:13px;color:var(--text)"><option value="A">A — IPv4</option><option value="AAAA">AAAA — IPv6</option><option value="CNAME">CNAME — hostname</option></select></div><div class="field"><label for="subTarget">Target / Konten</label><input id="subTarget" required placeholder="192.0.2.10 atau target.example.com"></div><div class="field"><label for="subTtl">TTL (detik, 1 = Auto)</label><input id="subTtl" type="number" min="1" max="86400" value="1" required></div><div class="field"><label for="subProxy">Proxy Cloudflare</label><select id="subProxy" style="width:100%;background:#090f1f;border:1px solid var(--line);border-radius:12px;padding:13px;color:var(--text)"><option value="false">DNS only</option><option value="true">Proxied (A/AAAA/CNAME)</option></select></div></div><div class="result" id="subPreview">Hostname hasil: —</div><div class="actions"><button class="btn" id="subSave" type="submit">＋ Buat Subdomain</button><button class="btn secondary" id="subReset" type="button">Bersihkan</button></div><div id="subMessage" class="result"></div></form></div><div class="card action-card"><h2 class="section-title">Contoh</h2><p class="muted">Zona: <b>kings.biz.id</b> · Nama: <b>youtube.com</b> · Hasil: <b>youtube.com.kings.biz.id</b></p><p class="muted">Pastikan target benar dan zona induk sudah aktif. Membuat record tidak otomatis membuat layanan tujuan tersedia.</p></div>`;
  const $sub=id=>$(id), msg=$sub('subMessage');
